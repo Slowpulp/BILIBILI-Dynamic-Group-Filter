@@ -241,16 +241,14 @@ export const PANEL_STYLE = String.raw`
     background: var(--surface);
     box-shadow: var(--shadow);
     color: var(--accent);
-    cursor: grab;
+    cursor: pointer;
     font-size: 20px;
-    touch-action: none;
     user-select: none;
     backdrop-filter: blur(16px);
     transition: transform 160ms ease, box-shadow 160ms ease;
   }
 
   .launcher:hover { transform: translateY(-2px); }
-  :host([data-dragging="true"]) .launcher { cursor: grabbing; transform: none; }
 
   .launcher-icon {
     display: block;

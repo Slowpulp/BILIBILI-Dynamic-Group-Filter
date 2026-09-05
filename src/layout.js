@@ -1,4 +1,5 @@
 const PANEL_DIRECTIONS = Object.freeze(["down", "up", "right", "left"]);
+const LAUNCHER_CORNERS = new Set(["bottom-left", "bottom-right", "top-left", "top-right"]);
 
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
@@ -45,43 +46,26 @@ export function clampLauncherPixels(pixels, options = {}) {
   };
 }
 
-/** Convert a persisted normalized launcher position to viewport pixels. */
-export function launcherPositionToPixels(position, options = {}) {
+/** Resolve one of the four persisted launcher corners to viewport pixels. */
+export function launcherCornerToPixels(corner, options = {}) {
   const metrics = launcherMetrics(options);
-
-  if (!position || typeof position !== "object") {
-    const compact = metrics.viewportWidth <= 720;
-    const horizontalOffset = compact ? 10 : 18;
-    const bottomOffset = compact ? 12 : 22;
-    const dock = options.dock === "left" ? "left" : "right";
-    return clampLauncherPixels({
-      x: dock === "left"
-        ? metrics.viewportLeft + horizontalOffset
-        : metrics.viewportLeft + metrics.viewportWidth - horizontalOffset - metrics.launcherSize,
-      y: metrics.viewportTop + metrics.viewportHeight - bottomOffset - metrics.launcherSize,
-    }, options);
-  }
-
-  const x = clamp(finiteNumber(position.x, 0), 0, 1);
-  const y = clamp(finiteNumber(position.y, 0), 0, 1);
-  const widthRange = Math.max(0, metrics.maxX - metrics.minX);
-  const heightRange = Math.max(0, metrics.maxY - metrics.minY);
+  const resolvedCorner = LAUNCHER_CORNERS.has(corner) ? corner : "bottom-right";
+  const compact = metrics.viewportWidth <= 720;
+  const horizontalOffset = nonNegative(options.horizontalOffset, compact ? 10 : 18);
+  // Leave the top corners below Bilibili's fixed navigation instead of merely
+  // hugging the visual viewport edge.
+  const topOffset = nonNegative(options.topOffset, compact ? 68 : 76);
+  const bottomOffset = nonNegative(options.bottomOffset, compact ? 12 : 22);
+  const onLeft = resolvedCorner.endsWith("left");
+  const onTop = resolvedCorner.startsWith("top");
   return clampLauncherPixels({
-    x: metrics.minX + x * widthRange,
-    y: metrics.minY + y * heightRange,
+    x: onLeft
+      ? metrics.viewportLeft + horizontalOffset
+      : metrics.viewportLeft + metrics.viewportWidth - horizontalOffset - metrics.launcherSize,
+    y: onTop
+      ? metrics.viewportTop + topOffset
+      : metrics.viewportTop + metrics.viewportHeight - bottomOffset - metrics.launcherSize,
   }, options);
-}
-
-/** Convert launcher pixels into a viewport-independent normalized position. */
-export function launcherPixelsToPosition(pixels, options = {}) {
-  const metrics = launcherMetrics(options);
-  const clamped = clampLauncherPixels(pixels, options);
-  const widthRange = metrics.maxX - metrics.minX;
-  const heightRange = metrics.maxY - metrics.minY;
-  return {
-    x: widthRange > 0 ? (clamped.x - metrics.minX) / widthRange : 0.5,
-    y: heightRange > 0 ? (clamped.y - metrics.minY) / heightRange : 0.5,
-  };
 }
 
 function panelCandidate(direction, anchor, panelWidth, panelHeight, gap) {

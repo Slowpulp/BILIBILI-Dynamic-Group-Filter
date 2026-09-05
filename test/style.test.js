@@ -24,12 +24,12 @@ test("gradient launcher SVG keeps a stable high-density icon size", () => {
   assert.match(PANEL_STYLE, /@media\s*\(forced-colors:\s*active\)\s*\{\s*\.launcher-icon path\s*\{\s*fill:\s*ButtonText;/s);
 });
 
-test("launcher dragging and viewport-positioned panel avoid dock-only layout", () => {
+test("fixed-corner launcher remains an ordinary button beside a viewport-positioned panel", () => {
   assert.match(GLOBAL_STYLE, /#btf-root\s*\{[^}]*pointer-events:\s*none;/s);
-  assert.match(PANEL_STYLE, /\.launcher\s*\{[^}]*cursor:\s*grab;[^}]*touch-action:\s*none;[^}]*user-select:\s*none;/s);
+  assert.match(PANEL_STYLE, /\.launcher\s*\{[^}]*cursor:\s*pointer;[^}]*user-select:\s*none;/s);
   assert.match(PANEL_STYLE, /\.launcher, \.panel, \.toast\s*\{\s*pointer-events:\s*auto;/s);
-  assert.match(PANEL_STYLE, /:host\(\[data-dragging="true"\]\) \.launcher\s*\{[^}]*cursor:\s*grabbing;[^}]*transform:\s*none;/s);
   assert.match(PANEL_STYLE, /\.panel\s*\{[^}]*position:\s*fixed;/s);
+  assert.doesNotMatch(PANEL_STYLE, /data-dragging|cursor:\s*grab(?:bing)?|touch-action:\s*none/);
   assert.doesNotMatch(PANEL_STYLE, /data-dock/);
 });
 

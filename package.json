@@ -1,6 +1,6 @@
 {
   "name": "bilibili-timeline-focus",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "B站动态分组筛选与本地阅读辅助油猴脚本",

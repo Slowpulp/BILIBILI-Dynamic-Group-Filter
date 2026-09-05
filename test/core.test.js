@@ -48,6 +48,7 @@ test('normalizeSettings validates storage values and migrates legacy group state
   const normalized = normalizeSettings({
     enabled: false,
     panelOpen: true,
+    launcherCorner: 'top-left',
     dock: 'left',
     launcherPosition: null,
     panelDirection: 'auto',
@@ -69,11 +70,10 @@ test('normalizeSettings validates storage values and migrates legacy group state
   });
 
   assert.deepEqual(normalized, {
-    schemaVersion: 1,
+    schemaVersion: 2,
     enabled: false,
     panelOpen: true,
-    dock: 'left',
-    launcherPosition: null,
+    launcherCorner: 'top-left',
     panelDirection: 'auto',
     fontScale: 100,
     theme: 'dark',
@@ -92,19 +92,27 @@ test('normalizeSettings validates storage values and migrates legacy group state
   assert.equal('unexpectedKey' in normalized, false);
 });
 
-test('normalizeSettings clamps launcher coordinates and snaps font scaling', () => {
-  assert.deepEqual(normalizeSettings({
-    launcherPosition: { x: -0.25, y: 1.4 },
+test('normalizeSettings validates fixed launcher corners, migrates legacy positions, and snaps font scaling', () => {
+  const normalized = normalizeSettings({
+    launcherCorner: 'bottom-left',
     panelDirection: 'left',
     fontScale: 136,
-  }).launcherPosition, { x: 0, y: 1 });
+  });
+  assert.equal(normalized.launcherCorner, 'bottom-left');
   assert.equal(normalizeSettings({ panelDirection: 'left' }).panelDirection, 'left');
   assert.equal(normalizeSettings({ fontScale: 136 }).fontScale, 140);
   assert.equal(normalizeSettings({ fontScale: 999 }).fontScale, 150);
   assert.equal(normalizeSettings({ fontScale: 1 }).fontScale, 80);
   assert.equal(normalizeSettings({ fontScale: 'invalid' }).fontScale, 100);
   assert.equal(normalizeSettings({ panelDirection: 'diagonal' }).panelDirection, 'auto');
-  assert.equal(normalizeSettings({ launcherPosition: { x: 0.5, y: 'bad' } }).launcherPosition, null);
+  assert.equal(normalizeSettings({ launcherCorner: 'center' }).launcherCorner, 'bottom-right');
+  assert.equal(normalizeSettings({ launcherPosition: { x: 0.2, y: 0.1 } }).launcherCorner, 'top-left');
+  assert.equal(normalizeSettings({ launcherPosition: { x: 0.8, y: 0.1 } }).launcherCorner, 'top-right');
+  assert.equal(normalizeSettings({ launcherPosition: { x: 0.2, y: 0.8 } }).launcherCorner, 'bottom-left');
+  assert.equal(normalizeSettings({ launcherPosition: { x: 0.8, y: 0.8 } }).launcherCorner, 'bottom-right');
+  assert.equal(normalizeSettings({ launcherPosition: { x: 0.5, y: 0.5 } }).launcherCorner, 'bottom-right');
+  assert.equal(normalizeSettings({ launcherPosition: { x: -0.25, y: 1.4 } }).launcherCorner, 'bottom-left');
+  assert.equal(normalizeSettings({ launcherPosition: { x: 0.5, y: 'bad' }, dock: 'left' }).launcherCorner, 'bottom-left');
 });
 
 test('parseKeywords handles each entry as case-insensitive literal text', () => {
@@ -266,7 +274,7 @@ test('normalizeGroupCache returns the standard schema plus a derived lookup', ()
   };
 
   assert.deepEqual(normalizeGroupCache(raw), {
-    schemaVersion: 1,
+    schemaVersion: 2,
     uid: '42',
     fetchedAt: 1_700_000_000_123,
     groups: [
@@ -298,7 +306,7 @@ test('normalizeGroupCache returns the standard schema plus a derived lookup', ()
   });
 
   assert.deepEqual(normalizeGroupCache(null), {
-    schemaVersion: 1,
+    schemaVersion: 2,
     uid: null,
     fetchedAt: 0,
     groups: [],

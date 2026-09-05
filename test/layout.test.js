@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   clampLauncherPixels,
-  launcherPixelsToPosition,
-  launcherPositionToPixels,
+  launcherCornerToPixels,
   placePanel,
 } from "../src/layout.js";
 
@@ -15,58 +14,49 @@ const VIEWPORT = {
   launcherSize: 48,
 };
 
-test("launcher normalized positions make a stable round trip", () => {
-  for (const position of [
-    { x: 0, y: 0 },
-    { x: 0.25, y: 0.75 },
-    { x: 1, y: 1 },
-  ]) {
-    const pixels = launcherPositionToPixels(position, VIEWPORT);
-    const restored = launcherPixelsToPosition(pixels, VIEWPORT);
-    assert.ok(Math.abs(restored.x - position.x) < 1e-12);
-    assert.ok(Math.abs(restored.y - position.y) < 1e-12);
+test("launcher resolves to exactly four fixed viewport corners", () => {
+  const expected = {
+    "top-left": { x: 18, y: 76 },
+    "top-right": { x: 934, y: 76 },
+    "bottom-left": { x: 18, y: 730 },
+    "bottom-right": { x: 934, y: 730 },
+  };
+  for (const [corner, pixels] of Object.entries(expected)) {
+    assert.deepEqual(launcherCornerToPixels(corner, VIEWPORT), pixels);
   }
+  assert.deepEqual(launcherCornerToPixels("center", VIEWPORT), expected["bottom-right"]);
 });
 
-test("launcher pixels and normalized positions are clamped to the usable viewport", () => {
+test("launcher corners respect visual viewport offsets, compact sizing, and hard boundaries", () => {
   assert.deepEqual(
     clampLauncherPixels({ x: -100, y: 900 }, VIEWPORT),
     { x: 12, y: 740 },
   );
   assert.deepEqual(
-    launcherPositionToPixels({ x: -2, y: 4 }, VIEWPORT),
-    { x: 12, y: 740 },
-  );
-  assert.deepEqual(
-    launcherPixelsToPosition({ x: -100, y: 900 }, VIEWPORT),
-    { x: 0, y: 1 },
-  );
-  assert.deepEqual(
-    launcherPositionToPixels({ x: 0, y: 1 }, {
+    launcherCornerToPixels("top-left", {
       ...VIEWPORT,
       viewportLeft: 120,
       viewportTop: 45,
     }),
-    { x: 132, y: 785 },
-  );
-});
-
-test("null launcher position restores dock-aware legacy desktop and compact positions", () => {
-  assert.deepEqual(
-    launcherPositionToPixels(null, { ...VIEWPORT, dock: "right" }),
-    { x: 934, y: 730 },
+    { x: 138, y: 121 },
   );
   assert.deepEqual(
-    launcherPositionToPixels(null, { ...VIEWPORT, dock: "left" }),
-    { x: 18, y: 730 },
-  );
-  assert.deepEqual(
-    launcherPositionToPixels(null, {
+    launcherCornerToPixels("bottom-right", {
       viewportWidth: 600,
       viewportHeight: 500,
-      dock: "right",
+      margin: 12,
+      launcherSize: 48,
     }),
     { x: 540, y: 440 },
+  );
+  assert.deepEqual(
+    launcherCornerToPixels("top-right", {
+      viewportWidth: 80,
+      viewportHeight: 100,
+      margin: 12,
+      launcherSize: 48,
+    }),
+    { x: 20, y: 40 },
   );
 });
 
@@ -104,6 +94,36 @@ test("placePanel auto chooses a fitting direction with the best available space"
     viewportHeight: 600,
   });
   assert.deepEqual(result, { left: 280, top: 310, direction: "up" });
+});
+
+test("automatic panel placement opens inward from every launcher corner", () => {
+  const viewport = {
+    viewportWidth: 900,
+    viewportHeight: 700,
+    margin: 12,
+    launcherSize: 48,
+  };
+  const inwardDirections = {
+    "top-left": new Set(["down", "right"]),
+    "top-right": new Set(["down", "left"]),
+    "bottom-left": new Set(["up", "right"]),
+    "bottom-right": new Set(["up", "left"]),
+  };
+  for (const corner of ["top-left", "top-right", "bottom-left", "bottom-right"]) {
+    const pixels = launcherCornerToPixels(corner, viewport);
+    const anchor = { left: pixels.x, top: pixels.y, width: 48, height: 48 };
+    const placement = placePanel({
+      direction: "auto",
+      anchor,
+      panelWidth: 260,
+      panelHeight: 180,
+      viewportWidth: viewport.viewportWidth,
+      viewportHeight: viewport.viewportHeight,
+    });
+    assert.ok(inwardDirections[corner].has(placement.direction), `${corner} uses ${placement.direction}`);
+    assert.ok(placement.left >= 10 && placement.left + 260 <= 890, `${corner} horizontal boundary`);
+    assert.ok(placement.top >= 10 && placement.top + 180 <= 690, `${corner} vertical boundary`);
+  }
 });
 
 test("placePanel avoids blocked explicit directions and clamps cross-axis edges", () => {

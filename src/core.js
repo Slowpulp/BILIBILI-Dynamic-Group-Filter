@@ -1,10 +1,16 @@
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const HIDDEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const HIDDEN_MAX_ENTRIES = 2000;
 export const WATCH_LATER_MAX_ENTRIES = 500;
 export const FONT_SCALE_MIN = 80;
 export const FONT_SCALE_MAX = 150;
 export const FONT_SCALE_STEP = 10;
+export const LAUNCHER_CORNERS = Object.freeze([
+  "bottom-left",
+  "bottom-right",
+  "top-left",
+  "top-right",
+]);
 
 export const CARD_TYPES = Object.freeze([
   "video",
@@ -19,8 +25,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   schemaVersion: SCHEMA_VERSION,
   enabled: true,
   panelOpen: false,
-  dock: "right",
-  launcherPosition: null,
+  launcherCorner: "bottom-right",
   panelDirection: "auto",
   fontScale: 100,
   theme: "auto",
@@ -34,7 +39,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   cacheHours: 6,
 });
 
-const VALID_DOCKS = new Set(["left", "right"]);
+const VALID_LAUNCHER_CORNERS = new Set(LAUNCHER_CORNERS);
 const VALID_PANEL_DIRECTIONS = new Set(["auto", "up", "down", "left", "right"]);
 const VALID_THEMES = new Set(["auto", "light", "dark"]);
 const VALID_DENSITIES = new Set(["comfortable", "compact"]);
@@ -57,7 +62,7 @@ export function normalizeFontScale(value) {
   return Math.round(clamped / FONT_SCALE_STEP) * FONT_SCALE_STEP;
 }
 
-export function normalizeLauncherPosition(value) {
+function normalizeLegacyLauncherPosition(value) {
   if (!isPlainObject(value)) return null;
   const x = Number(value.x);
   const y = Number(value.y);
@@ -66,6 +71,20 @@ export function normalizeLauncherPosition(value) {
     x: Math.min(1, Math.max(0, x)),
     y: Math.min(1, Math.max(0, y)),
   };
+}
+
+export function normalizeLauncherCorner(value, {
+  launcherPosition = null,
+  dock = "right",
+} = {}) {
+  if (VALID_LAUNCHER_CORNERS.has(value)) return value;
+  const legacyPosition = normalizeLegacyLauncherPosition(launcherPosition);
+  if (legacyPosition) {
+    const vertical = legacyPosition.y < 0.5 ? "top" : "bottom";
+    const horizontal = legacyPosition.x < 0.5 ? "left" : "right";
+    return `${vertical}-${horizontal}`;
+  }
+  return dock === "left" ? "bottom-left" : DEFAULT_SETTINGS.launcherCorner;
 }
 
 function normalizeGroupStates(raw) {
@@ -115,8 +134,10 @@ export function normalizeSettings(raw) {
     schemaVersion: SCHEMA_VERSION,
     enabled: value.enabled !== false,
     panelOpen: value.panelOpen === true,
-    dock: VALID_DOCKS.has(value.dock) ? value.dock : DEFAULT_SETTINGS.dock,
-    launcherPosition: normalizeLauncherPosition(value.launcherPosition),
+    launcherCorner: normalizeLauncherCorner(value.launcherCorner, {
+      launcherPosition: value.launcherPosition,
+      dock: value.dock,
+    }),
     panelDirection: VALID_PANEL_DIRECTIONS.has(value.panelDirection)
       ? value.panelDirection
       : DEFAULT_SETTINGS.panelDirection,

@@ -18,13 +18,12 @@ import {
 import { SELECTORS, collectCardWrappers, extractCardModel } from "./dom.js";
 import {
   clampLauncherPixels,
-  launcherPixelsToPosition,
-  launcherPositionToPixels,
+  launcherCornerToPixels,
   placePanel,
 } from "./layout.js";
 import { GLOBAL_STYLE, PANEL_STYLE } from "./style.js";
 
-const VERSION = "1.2.0";
+const VERSION = "2.0.0";
 const STORAGE_PREFIX = "__bilibili_timeline_focus_v1__";
 const ROOT_ID = "btf-root";
 const GLOBAL_STYLE_ID = "btf-global-style";
@@ -37,7 +36,6 @@ const LAUNCHER_SIZE = 48;
 const LAUNCHER_MARGIN = 12;
 const PANEL_MARGIN = 10;
 const PANEL_GAP = 10;
-const DRAG_THRESHOLD = 5;
 const TYPE_LABELS = Object.freeze({
   video: "视频",
   image: "图文",
@@ -257,9 +255,6 @@ const state = {
   historyHooks: [],
   drawerReturnFocus: null,
   launcherAnchor: null,
-  launcherDrag: null,
-  launcherDragFrame: 0,
-  suppressLauncherClickUntil: 0,
   panelFrame: 0,
   panelResizeObserver: null,
 };
@@ -493,7 +488,7 @@ function ensureGlobalStyle() {
 function staticPanelMarkup() {
   return `
     <style>${PANEL_STYLE}</style>
-    <button class="launcher" type="button" aria-label="打开动态净览" aria-controls="btf-panel" aria-expanded="false" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight" title="打开动态净览（拖动或方向键可调整位置）">
+    <button class="launcher" type="button" aria-label="打开动态净览" aria-controls="btf-panel" aria-expanded="false" title="打开动态净览（入口位置可在设置中选择）">
       <svg class="launcher-icon" viewBox="0 0 28 28" aria-hidden="true" focusable="false">
         <defs>
           <linearGradient id="btf-launcher-funnel-gradient" x1="2" y1="3" x2="16" y2="25" gradientUnits="userSpaceOnUse">
@@ -557,6 +552,7 @@ function staticPanelMarkup() {
           <div class="section-title"><h3>界面与布局</h3></div>
           <div class="settings-grid">
             <label class="field"><span>主题</span><select class="theme"><option value="auto">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
+            <label class="field"><span>入口位置</span><select class="launcher-corner"><option value="bottom-left">左下角</option><option value="bottom-right">右下角</option><option value="top-left">左上角</option><option value="top-right">右上角</option></select></label>
             <label class="field"><span>展开方向</span><select class="panel-direction"><option value="auto">自动避让</option><option value="up">向上优先</option><option value="down">向下优先</option><option value="left">向左优先</option><option value="right">向右优先</option></select></label>
             <label class="field"><span>卡片密度</span><select class="density"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></label>
             <label class="field"><span>信息流宽度</span><select class="feed-width"><option value="default">原始</option><option value="wide">加宽</option></select></label>
@@ -621,6 +617,7 @@ function mountUi() {
     keywords: shadow.querySelector(".keywords"),
     caseSensitive: shadow.querySelector(".case-sensitive"),
     theme: shadow.querySelector(".theme"),
+    launcherCorner: shadow.querySelector(".launcher-corner"),
     panelDirection: shadow.querySelector(".panel-direction"),
     fontScale: shadow.querySelector(".font-scale"),
     fontDecrease: shadow.querySelector(".font-decrease"),
@@ -692,19 +689,15 @@ function applyLauncherPixels(pixels) {
 
 function applyLauncherPosition() {
   if (!state.root) return;
-  if (state.launcherDrag?.moved && state.launcherDrag.livePixels) {
-    applyLauncherPixels(state.launcherDrag.livePixels);
-    return;
-  }
   const viewport = viewportSize();
-  applyLauncherPixels(launcherPositionToPixels(state.settings.launcherPosition, {
+  state.root.dataset.launcherCorner = state.settings.launcherCorner;
+  applyLauncherPixels(launcherCornerToPixels(state.settings.launcherCorner, {
     viewportWidth: viewport.width,
     viewportHeight: viewport.height,
     viewportLeft: viewport.left,
     viewportTop: viewport.top,
     margin: LAUNCHER_MARGIN,
     launcherSize: LAUNCHER_SIZE,
-    dock: state.settings.dock,
   }));
 }
 
@@ -749,152 +742,15 @@ function schedulePanelPosition() {
   });
 }
 
-function advanceLauncherDrag(event) {
-  const drag = state.launcherDrag;
-  if (!drag || event.pointerId !== drag.pointerId) return false;
-  const dx = Number(event.clientX) - drag.startX;
-  const dy = Number(event.clientY) - drag.startY;
-  if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return false;
-  drag.moved = true;
-  drag.livePixels = { x: drag.originX + dx, y: drag.originY + dy };
-  if (state.root) state.root.dataset.dragging = "true";
-  return true;
-}
-
-function scheduleLauncherDrag() {
-  if (state.launcherDragFrame) return;
-  const root = state.root;
-  const generation = state.routeGeneration;
-  state.launcherDragFrame = requestAnimationFrame(() => {
-    state.launcherDragFrame = 0;
-    if (root !== state.root || !root?.isConnected || generation !== state.routeGeneration) return;
-    if (state.launcherDrag?.moved) applyLauncherPixels(state.launcherDrag.livePixels);
-  });
-}
-
-function handleLauncherPointerDown(event) {
-  if (state.settings.panelOpen || event.button !== 0 || event.isPrimary === false) return;
-  applyLauncherPosition();
-  const anchor = state.launcherAnchor;
-  if (!anchor) return;
-  state.launcherDrag = {
-    pointerId: event.pointerId,
-    startX: Number(event.clientX),
-    startY: Number(event.clientY),
-    originX: anchor.left,
-    originY: anchor.top,
-    livePixels: { x: anchor.left, y: anchor.top },
-    moved: false,
-  };
-  try {
-    state.ui.launcher?.setPointerCapture?.(event.pointerId);
-  } catch {
-    // Window-level pointer listeners still keep the drag usable.
-  }
-}
-
-function handleLauncherPointerMove(event) {
-  if (!advanceLauncherDrag(event)) return;
-  event.preventDefault();
-  scheduleLauncherDrag();
-}
-
-function finishLauncherDrag(event, { cancelled = false } = {}) {
-  const drag = state.launcherDrag;
-  if (!drag || event.pointerId !== drag.pointerId) return;
-  if (!cancelled) advanceLauncherDrag(event);
-  if (state.launcherDragFrame) cancelAnimationFrame(state.launcherDragFrame);
-  state.launcherDragFrame = 0;
-  try {
-    state.ui.launcher?.releasePointerCapture?.(drag.pointerId);
-  } catch {
-    // Pointer capture may already have been released by the browser.
-  }
-  if (cancelled) {
-    applyLauncherPixels({ x: drag.originX, y: drag.originY });
-  } else if (drag.moved) {
-    applyLauncherPixels(drag.livePixels);
-    const viewport = viewportSize();
-    state.settings.launcherPosition = launcherPixelsToPosition(
-      { x: state.launcherAnchor.left, y: state.launcherAnchor.top },
-      {
-        viewportWidth: viewport.width,
-        viewportHeight: viewport.height,
-        viewportLeft: viewport.left,
-        viewportTop: viewport.top,
-        margin: LAUNCHER_MARGIN,
-        launcherSize: LAUNCHER_SIZE,
-      },
-    );
-    saveSettings();
-    state.suppressLauncherClickUntil = Date.now() + 500;
-  }
-  delete state.root?.dataset.dragging;
-  state.launcherDrag = null;
-}
-
-function handleLauncherPointerUp(event) {
-  finishLauncherDrag(event);
-}
-
-function handleLauncherPointerCancel(event) {
-  finishLauncherDrag(event, { cancelled: true });
-}
-
 function handleViewportChange() {
   if (!state.root?.isConnected) return;
   applyLauncherPosition();
   schedulePanelPosition();
 }
 
-function handleLauncherKeydown(event) {
-  const movements = {
-    ArrowUp: [0, -1],
-    ArrowDown: [0, 1],
-    ArrowLeft: [-1, 0],
-    ArrowRight: [1, 0],
-  };
-  const movement = movements[event.key];
-  if (!movement || state.settings.panelOpen) return;
-  event.preventDefault();
-  applyLauncherPosition();
-  if (!state.launcherAnchor) return;
-  const step = event.shiftKey ? 24 : 8;
-  applyLauncherPixels({
-    x: state.launcherAnchor.left + movement[0] * step,
-    y: state.launcherAnchor.top + movement[1] * step,
-  });
-  const viewport = viewportSize();
-  state.settings.launcherPosition = launcherPixelsToPosition(
-    { x: state.launcherAnchor.left, y: state.launcherAnchor.top },
-    {
-      viewportWidth: viewport.width,
-      viewportHeight: viewport.height,
-      viewportLeft: viewport.left,
-      viewportTop: viewport.top,
-      margin: LAUNCHER_MARGIN,
-      launcherSize: LAUNCHER_SIZE,
-    },
-  );
-  saveSettings();
-}
-
 function bindUiEvents() {
   const ui = state.ui;
-  ui.launcher.addEventListener("pointerdown", handleLauncherPointerDown);
-  ui.launcher.addEventListener("keydown", handleLauncherKeydown);
-  ui.launcher.addEventListener("click", (event) => {
-    if (event.detail !== 0 && Date.now() <= state.suppressLauncherClickUntil) {
-      event.preventDefault();
-      state.suppressLauncherClickUntil = 0;
-      return;
-    }
-    state.suppressLauncherClickUntil = 0;
-    setPanelOpen(true);
-  });
-  window.addEventListener("pointermove", handleLauncherPointerMove, { passive: false });
-  window.addEventListener("pointerup", handleLauncherPointerUp);
-  window.addEventListener("pointercancel", handleLauncherPointerCancel);
+  ui.launcher.addEventListener("click", () => setPanelOpen(true));
   window.addEventListener("resize", handleViewportChange);
   window.addEventListener("orientationchange", handleViewportChange);
   window.visualViewport?.addEventListener("resize", handleViewportChange);
@@ -957,6 +813,7 @@ function bindUiEvents() {
   });
   for (const [element, property] of [
     [ui.theme, "theme"],
+    [ui.launcherCorner, "launcherCorner"],
     [ui.panelDirection, "panelDirection"],
     [ui.density, "density"],
     [ui.feedWidth, "feedWidth"],
@@ -1056,6 +913,7 @@ function renderUi() {
   state.ui.keywords.value = state.keywordDraft ?? state.settings.keywords.join("\n");
   state.ui.caseSensitive.checked = state.settings.caseSensitive;
   state.ui.theme.value = state.settings.theme;
+  state.ui.launcherCorner.value = state.settings.launcherCorner;
   state.ui.panelDirection.value = state.settings.panelDirection;
   state.ui.density.value = state.settings.density;
   state.ui.feedWidth.value = state.settings.feedWidth;
@@ -2211,15 +2069,11 @@ function suspendRoute() {
   abortGroupLoads();
   if (state.scanFrame) cancelAnimationFrame(state.scanFrame);
   if (state.bindFrame) cancelAnimationFrame(state.bindFrame);
-  if (state.launcherDragFrame) cancelAnimationFrame(state.launcherDragFrame);
   if (state.panelFrame) cancelAnimationFrame(state.panelFrame);
   state.scanFrame = 0;
   state.bindFrame = 0;
-  state.launcherDragFrame = 0;
   state.panelFrame = 0;
-  state.launcherDrag = null;
   state.launcherAnchor = null;
-  state.suppressLauncherClickUntil = 0;
   state.panelResizeObserver?.disconnect();
   state.panelResizeObserver = null;
   state.pendingCards.clear();
@@ -2241,9 +2095,6 @@ function suspendRoute() {
   clearOurCardChanges();
   clearLayoutSettings();
   document.removeEventListener("keydown", handleGlobalKeydown);
-  window.removeEventListener("pointermove", handleLauncherPointerMove);
-  window.removeEventListener("pointerup", handleLauncherPointerUp);
-  window.removeEventListener("pointercancel", handleLauncherPointerCancel);
   window.removeEventListener("resize", handleViewportChange);
   window.removeEventListener("orientationchange", handleViewportChange);
   window.visualViewport?.removeEventListener("resize", handleViewportChange);
