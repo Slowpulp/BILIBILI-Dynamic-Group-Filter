@@ -24,7 +24,7 @@ import {
 } from "./layout.js";
 import { GLOBAL_STYLE, PANEL_STYLE } from "./style.js";
 
-const VERSION = "2.1.0";
+const VERSION = "2.1.1";
 const STORAGE_PREFIX = "__bilibili_timeline_focus_v1__";
 const ROOT_ID = "btf-root";
 const GLOBAL_STYLE_ID = "btf-global-style";
@@ -1540,7 +1540,13 @@ function processCard(wrapper, { force = false } = {}) {
     model.relatedUrls.join(","),
     fnv1a(model.text),
   ].join("|");
-  if (!force && state.cardSignatures.get(wrapper) === signature && wrapper.querySelector(".btf-card-tools")) return;
+  const existingToolbar = wrapper.querySelector(".btf-card-tools");
+  if (
+    !force
+    && state.cardSignatures.get(wrapper) === signature
+    && existingToolbar
+    && cardToolbarPlacementIsCurrent(wrapper, existingToolbar)
+  ) return;
   state.cardSignatures.set(wrapper, signature);
   wrapper.dataset.btfAuthorKnown = String(Boolean(model.authorMid));
   enhanceCard(wrapper);
@@ -1640,28 +1646,87 @@ function actionButton(icon, label, action) {
   return button;
 }
 
+function clearCardToolPlacement(root) {
+  for (const host of root?.querySelectorAll?.("[data-btf-card-tools-host]") ?? []) {
+    delete host.dataset.btfCardToolsHost;
+  }
+  for (const slot of root?.querySelectorAll?.("[data-btf-card-author-slot]") ?? []) {
+    delete slot.dataset.btfCardAuthorSlot;
+  }
+}
+
+function authorTitlePlacement(header) {
+  const authorName = header.querySelector(SELECTORS.authorName);
+  const title = authorName?.closest(".bili-dyn-title, [data-module='title']");
+  if (
+    !authorName
+    || !title
+    || title === header
+    || !header.contains(title)
+    || title.closest("a, button, label, [role='button'], [role='link']")
+  ) {
+    return null;
+  }
+  let authorSlot = authorName;
+  while (authorSlot.parentElement && authorSlot.parentElement !== title) {
+    authorSlot = authorSlot.parentElement;
+  }
+  return authorSlot.parentElement === title ? { title, authorSlot } : null;
+}
+
+function cardToolbarPlacementIsCurrent(wrapper, toolbar) {
+  const card = wrapper.querySelector(SELECTORS.card) ?? wrapper;
+  const header = card.querySelector(".bili-dyn-item__header");
+  if (!header) return false;
+  const placement = authorTitlePlacement(header);
+  if (placement) {
+    return toolbar.dataset.placement === "author"
+      && toolbar.parentElement === placement.title
+      && toolbar.previousElementSibling === placement.authorSlot
+      && placement.title.dataset.btfCardToolsHost === "author"
+      && placement.authorSlot.dataset.btfCardAuthorSlot === "true";
+  }
+  return toolbar.dataset.placement === "header" && toolbar.parentElement === header;
+}
+
+function placeCardToolbar(wrapper, header, toolbar) {
+  clearCardToolPlacement(wrapper);
+  const placement = authorTitlePlacement(header);
+  if (placement) {
+    placement.title.dataset.btfCardToolsHost = "author";
+    placement.authorSlot.dataset.btfCardAuthorSlot = "true";
+    toolbar.dataset.placement = "author";
+    placement.title.insertBefore(toolbar, placement.authorSlot.nextSibling);
+    return;
+  }
+  toolbar.dataset.placement = "header";
+  const more = header.querySelector(".bili-dyn-item__more");
+  header.insertBefore(toolbar, more?.parentElement === header ? more : null);
+}
+
 function enhanceCard(wrapper) {
-  if (wrapper.querySelector(".btf-card-tools")) return;
   const card = wrapper.querySelector(SELECTORS.card) ?? wrapper;
   const header = card.querySelector(".bili-dyn-item__header");
   if (!header) return;
-  const toolbar = document.createElement("div");
-  toolbar.className = "btf-card-tools";
-  toolbar.setAttribute("role", "group");
-  toolbar.setAttribute("aria-label", "动态净览本地操作");
-  const hide = actionButton("×", "隐藏", "hide");
-  const watch = actionButton("☆", "本地稍后看", "watch");
-  toolbar.append(hide, watch);
-  toolbar.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-action]");
-    if (!button) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (button.dataset.action === "hide") hideCard(wrapper, { focusUndo: event.detail === 0 });
-    if (button.dataset.action === "watch") toggleWatchLater(wrapper);
-  });
-  const more = header.querySelector(".bili-dyn-item__more");
-  header.insertBefore(toolbar, more?.parentElement === header ? more : null);
+  let toolbar = wrapper.querySelector(".btf-card-tools");
+  if (!toolbar) {
+    toolbar = document.createElement("div");
+    toolbar.className = "btf-card-tools";
+    toolbar.setAttribute("role", "group");
+    toolbar.setAttribute("aria-label", "动态净览本地操作");
+    const hide = actionButton("×", "隐藏", "hide");
+    const watch = actionButton("☆", "本地稍后看", "watch");
+    toolbar.append(hide, watch);
+    toolbar.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (button.dataset.action === "hide") hideCard(wrapper, { focusUndo: event.detail === 0 });
+      if (button.dataset.action === "watch") toggleWatchLater(wrapper);
+    });
+  }
+  placeCardToolbar(wrapper, header, toolbar);
   wrapper.dataset.btfEnhanced = "true";
 }
 
@@ -2115,6 +2180,7 @@ function clearOurCardChanges() {
     delete wrapper.dataset.btfEnhanced;
     delete wrapper.dataset.btfAuthorKnown;
     wrapper.querySelector(".btf-card-tools")?.remove();
+    clearCardToolPlacement(wrapper);
   });
   state.emptyNotice?.remove();
   state.emptyNotice = null;

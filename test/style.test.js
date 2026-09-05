@@ -19,6 +19,15 @@ test("group gesture states retain blue inclusion and red exclusion styling", () 
   assert.match(PANEL_STYLE, /\.group-row\[data-state="-1"\]:focus-visible\s*\{[^}]*outline-color:\s*var\(--danger\);/s);
 });
 
+test("card actions stay in the author title flow without covering body content", () => {
+  assert.match(GLOBAL_STYLE, /\[data-btf-card-tools-host="author"\]\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*nowrap;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s);
+  assert.match(GLOBAL_STYLE, /\[data-btf-card-author-slot="true"\]\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
+  assert.match(GLOBAL_STYLE, /\.btf-card-tools\s*\{[^}]*display:\s*inline-flex;[^}]*flex:\s*0\s+0\s+auto;/s);
+  assert.match(GLOBAL_STYLE, /\.btf-card-tools\[data-placement="author"\]\s*\{[^}]*margin-left:\s*8px;[^}]*margin-right:\s*0;/s);
+  assert.match(GLOBAL_STYLE, /@media\s*\(hover:\s*none\),\s*\(pointer:\s*coarse\)\s*\{[^}]*\.btf-card-tools\s*\{[^}]*opacity:\s*1;[^}]*transform:\s*none;/s);
+  assert.doesNotMatch(GLOBAL_STYLE, /\.btf-card-tools\s*\{[^}]*position:\s*(?:absolute|fixed)/s);
+});
+
 test("gradient launcher SVG keeps a stable high-density icon size", () => {
   assert.match(PANEL_STYLE, /\.launcher-icon\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;[^}]*overflow:\s*visible;[^}]*pointer-events:\s*none;/s);
   assert.match(PANEL_STYLE, /@media\s*\(forced-colors:\s*active\)\s*\{\s*\.launcher-icon path\s*\{\s*fill:\s*ButtonText;/s);

@@ -32,15 +32,36 @@ export const GLOBAL_STYLE = String.raw`
     align-items: center;
   }
 
+  [data-btf-card-tools-host="author"] {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  [data-btf-card-author-slot="true"] {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .btf-card-tools {
     display: inline-flex;
     align-items: center;
+    flex: 0 0 auto;
     gap: 4px;
     margin-left: auto;
     margin-right: 6px;
     opacity: 0;
     transform: translateY(-2px);
     transition: opacity 150ms ease, transform 150ms ease;
+  }
+
+  .btf-card-tools[data-placement="author"] {
+    margin-left: 8px;
+    margin-right: 0;
   }
 
   .bili-dyn-item:hover .btf-card-tools,
@@ -140,6 +161,13 @@ export const GLOBAL_STYLE = String.raw`
 
     .btf-card-action .btf-label { display: none; }
     .btf-card-action .btf-icon { font-size: var(--btf-card-icon-font-size); }
+  }
+
+  @media (hover: none), (pointer: coarse) {
+    .btf-card-tools {
+      opacity: 1;
+      transform: none;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {

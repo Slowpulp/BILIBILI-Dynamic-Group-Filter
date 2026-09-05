@@ -18,7 +18,7 @@ const card = ({ did, mid, name, kind = "video", title }) => `
   <div class="bili-dyn-list__item" data-did="${did}">
     <div class="bili-dyn-item">
       <div class="bili-dyn-item__header" data-mid="${mid}">
-        <span class="bili-dyn-title__text">${name}</span>
+        <div class="bili-dyn-title"><span class="bili-dyn-title__text">${name}</span></div>
         <div class="bili-dyn-time"><a href="/opus/${did}">刚刚</a></div>
         <div class="bili-dyn-item__more"></div>
       </div>
@@ -91,6 +91,15 @@ test("userscript mounts, filters, restores, enhances new cards, and survives SPA
     assert.ok(window.document.getElementById("btf-root")?.shadowRoot);
     assert.equal(window.document.querySelectorAll(".btf-card-tools").length, 2);
   });
+  for (const wrapper of window.document.querySelectorAll(".bili-dyn-list__item")) {
+    const title = wrapper.querySelector(".bili-dyn-title");
+    const author = title.querySelector(".bili-dyn-title__text");
+    const toolbar = title.querySelector(":scope > .btf-card-tools");
+    assert.ok(toolbar);
+    assert.equal(toolbar.dataset.placement, "author");
+    assert.equal(author.nextElementSibling, toolbar);
+    assert.equal(wrapper.querySelector(".bili-dyn-item__header > .btf-card-tools"), null);
+  }
   const root = window.document.getElementById("btf-root");
   const shadow = root.shadowRoot;
   assert.match(shadow.querySelector(".brand-status").textContent, /登录/);
@@ -144,11 +153,14 @@ test("userscript mounts, filters, restores, enhances new cards, and survives SPA
   window.history.pushState({}, "", "/123456789");
   await waitFor(() => assert.equal(window.document.getElementById("btf-root"), null));
   assert.equal(window.document.querySelectorAll(".btf-card-tools").length, 0);
+  assert.equal(window.document.querySelectorAll("[data-btf-card-tools-host], [data-btf-card-author-slot]").length, 0);
   assert.equal(window.document.querySelectorAll("[data-btf-hidden-reason]").length, 0);
 
   window.history.pushState({}, "", "/");
   await waitFor(() => assert.ok(window.document.getElementById("btf-root")?.shadowRoot));
   await waitFor(() => assert.equal(window.document.querySelectorAll(".btf-card-tools").length, 3));
+  assert.equal(window.document.querySelectorAll('[data-btf-card-tools-host="author"]').length, 3);
+  assert.equal(window.document.querySelectorAll('[data-btf-card-author-slot="true"]').length, 3);
   assert.equal(window.document.querySelectorAll("#btf-root").length, 1);
 
   window.__BILIBILI_TIMELINE_FOCUS_INSTANCE__?.destroy();
@@ -250,7 +262,7 @@ test("rapid route leave and return keeps one UI/tool set and settles aborted sta
   dom.window.close();
 });
 
-test("a nested more control leaves toolbar insertion safe and attached to the header", async () => {
+test("a hydrated author row moves one toolbar beside a linked name and preserves the nested more control", async () => {
   const virtualConsole = new VirtualConsole();
   const runtimeErrors = [];
   virtualConsole.on("jsdomError", (error) => runtimeErrors.push(error));
@@ -259,7 +271,7 @@ test("a nested more control leaves toolbar insertion safe and attached to the he
     <main class="bili-dyn-home--visitor"><div class="bili-dyn-list"><div class="bili-dyn-list__items">
       <div class="bili-dyn-list__item" data-did="290000001"><div class="bili-dyn-item">
         <div class="bili-dyn-item__header" data-mid="291">
-          <span class="bili-dyn-title__text">嵌套菜单作者</span>
+          <a class="author-link" href="//space.bilibili.com/291"><span class="bili-dyn-title__text">嵌套菜单作者</span></a>
           <div class="bili-dyn-time"><a href="/opus/290000001">刚刚</a></div>
           <div class="header-actions"><div class="bili-dyn-item__more"></div></div>
         </div>
@@ -288,10 +300,37 @@ test("a nested more control leaves toolbar insertion safe and attached to the he
     const toolbar = wrapper.querySelector(".btf-card-tools");
     assert.ok(toolbar);
     assert.equal(toolbar.parentElement, header);
+    assert.equal(toolbar.dataset.placement, "header");
+    assert.equal(header.querySelector(".author-link").contains(toolbar), false);
     assert.equal(header.lastElementChild, toolbar);
+    assert.equal(toolbar.querySelectorAll("button").length, 2);
     assert.ok(header.querySelector(".header-actions > .bili-dyn-item__more"));
     const shadow = window.document.getElementById("btf-root").shadowRoot;
     assert.equal(shadow.querySelector('[data-stat="visible"]').textContent, "1");
+  });
+
+  const wrapper = window.document.querySelector(".bili-dyn-list__item");
+  const header = wrapper.querySelector(".bili-dyn-item__header");
+  const authorLink = header.querySelector(".author-link");
+  const title = window.document.createElement("div");
+  title.className = "bili-dyn-title";
+  authorLink.before(title);
+  title.append(authorLink);
+  const badge = window.document.createElement("span");
+  badge.className = "author-badge";
+  badge.textContent = "认证";
+  title.append(badge);
+
+  await waitFor(() => {
+    const toolbar = wrapper.querySelector(".btf-card-tools");
+    assert.equal(wrapper.querySelectorAll(".btf-card-tools").length, 1);
+    assert.equal(toolbar.parentElement, title);
+    assert.equal(toolbar.dataset.placement, "author");
+    assert.equal(toolbar.previousElementSibling, authorLink);
+    assert.equal(toolbar.nextElementSibling, badge);
+    assert.equal(authorLink.contains(toolbar), false);
+    assert.equal(header.lastElementChild?.className, "header-actions");
+    assert.ok(header.querySelector(".header-actions > .bili-dyn-item__more"));
   });
   assert.deepEqual(runtimeErrors, []);
 
