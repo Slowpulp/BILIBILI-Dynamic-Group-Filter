@@ -1,4 +1,5 @@
 import {
+  COLLAPSIBLE_SECTIONS,
   DEFAULT_SETTINGS,
   FONT_SCALE_MAX,
   FONT_SCALE_MIN,
@@ -23,7 +24,7 @@ import {
 } from "./layout.js";
 import { GLOBAL_STYLE, PANEL_STYLE } from "./style.js";
 
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
 const STORAGE_PREFIX = "__bilibili_timeline_focus_v1__";
 const ROOT_ID = "btf-root";
 const GLOBAL_STYLE_ID = "btf-global-style";
@@ -255,6 +256,7 @@ const state = {
   historyHooks: [],
   drawerReturnFocus: null,
   launcherAnchor: null,
+  panelResolvedDirection: null,
   panelFrame: 0,
   panelResizeObserver: null,
 };
@@ -531,48 +533,84 @@ function staticPanelMarkup() {
             <button class="switch enabled-switch" type="button" role="switch" aria-label="启用筛选" aria-checked="true"></button>
           </div>
         </section>
-        <section class="section">
-          <div class="section-title"><h3>关注分组</h3><span class="section-hint">包含取并集 · 排除优先</span></div>
-          <input class="search group-search" type="search" placeholder="搜索分组" aria-label="搜索关注分组">
-          <div class="group-gesture-help" id="btf-group-help">
-            <span class="include-gesture">左键包含</span><span class="exclude-gesture">右键排除</span><span>同键再次点击取消</span>
+        <section class="section collapsible-section" data-section-id="groups">
+          <h3 class="section-title">
+            <button class="section-toggle" id="btf-toggle-groups" type="button" data-section-id="groups" aria-expanded="true" aria-controls="btf-section-groups">
+              <span class="section-title-label">关注分组</span>
+              <span class="section-title-trailing"><span class="section-hint">包含取并集 · 排除优先</span><span class="section-chevron" aria-hidden="true"></span></span>
+            </button>
+          </h3>
+          <div class="section-collapse" id="btf-section-groups" role="region" aria-labelledby="btf-toggle-groups" aria-hidden="false">
+            <div class="section-content"><div class="section-content-inner">
+              <input class="search group-search" type="search" placeholder="搜索分组" aria-label="搜索关注分组">
+              <div class="group-gesture-help" id="btf-group-help">
+                <span class="include-gesture">左键包含</span><span class="exclude-gesture">右键排除</span><span>同键再次点击取消</span>
+              </div>
+              <div class="groups" aria-live="polite"></div>
+            </div></div>
           </div>
-          <div class="groups" aria-live="polite"></div>
         </section>
-        <section class="section">
-          <div class="section-title"><h3>隐藏内容类型</h3><span class="section-hint">未知类型会保留</span></div>
-          <div class="chips type-chips"></div>
-        </section>
-        <section class="section">
-          <div class="section-title"><h3>关键词屏蔽</h3><span class="section-hint">每行一个 · 普通文本</span></div>
-          <textarea class="keywords" maxlength="10099" placeholder="例如：抽奖&#10;带货&#10;剧透" aria-label="关键词屏蔽规则"></textarea>
-          <label class="inline-check"><input class="case-sensitive" type="checkbox">区分大小写</label>
-        </section>
-        <section class="section">
-          <div class="section-title"><h3>界面与布局</h3></div>
-          <div class="settings-grid">
-            <label class="field"><span>主题</span><select class="theme"><option value="auto">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
-            <label class="field"><span>入口位置</span><select class="launcher-corner"><option value="bottom-left">左下角</option><option value="bottom-right">右下角</option><option value="top-left">左上角</option><option value="top-right">右上角</option></select></label>
-            <label class="field"><span>展开方向</span><select class="panel-direction"><option value="auto">自动避让</option><option value="up">向上优先</option><option value="down">向下优先</option><option value="left">向左优先</option><option value="right">向右优先</option></select></label>
-            <label class="field"><span>卡片密度</span><select class="density"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></label>
-            <label class="field"><span>信息流宽度</span><select class="feed-width"><option value="default">原始</option><option value="wide">加宽</option></select></label>
+        <section class="section collapsible-section" data-section-id="types">
+          <h3 class="section-title">
+            <button class="section-toggle" id="btf-toggle-types" type="button" data-section-id="types" aria-expanded="true" aria-controls="btf-section-types">
+              <span class="section-title-label">隐藏内容类型</span>
+              <span class="section-title-trailing"><span class="section-hint">未知类型会保留</span><span class="section-chevron" aria-hidden="true"></span></span>
+            </button>
+          </h3>
+          <div class="section-collapse" id="btf-section-types" role="region" aria-labelledby="btf-toggle-types" aria-hidden="false">
+            <div class="section-content"><div class="section-content-inner">
+              <div class="chips type-chips"></div>
+            </div></div>
           </div>
-          <div class="font-toolbar" role="group" aria-label="界面字体大小">
-            <span class="font-toolbar-label">界面字号</span>
-            <button class="font-step font-decrease" type="button" aria-label="缩小界面字体" title="缩小字体">A−</button>
-            <input class="font-scale" id="btf-font-scale" type="range" min="${FONT_SCALE_MIN}" max="${FONT_SCALE_MAX}" step="${FONT_SCALE_STEP}" aria-label="界面字体大小">
-            <button class="font-step font-increase" type="button" aria-label="放大界面字体" title="放大字体">A+</button>
-            <button class="font-reset" type="button" aria-label="恢复默认字体大小" title="恢复 100%"><output class="font-scale-value" for="btf-font-scale">100%</output></button>
+        </section>
+        <section class="section collapsible-section" data-section-id="keywords">
+          <h3 class="section-title">
+            <button class="section-toggle" id="btf-toggle-keywords" type="button" data-section-id="keywords" aria-expanded="true" aria-controls="btf-section-keywords">
+              <span class="section-title-label">关键词屏蔽</span>
+              <span class="section-title-trailing"><span class="section-hint">每行一个 · 普通文本</span><span class="section-chevron" aria-hidden="true"></span></span>
+            </button>
+          </h3>
+          <div class="section-collapse" id="btf-section-keywords" role="region" aria-labelledby="btf-toggle-keywords" aria-hidden="false">
+            <div class="section-content"><div class="section-content-inner">
+              <textarea class="keywords" maxlength="10099" placeholder="例如：抽奖&#10;带货&#10;剧透" aria-label="关键词屏蔽规则"></textarea>
+              <label class="inline-check"><input class="case-sensitive" type="checkbox">区分大小写</label>
+            </div></div>
           </div>
-          <label class="inline-check"><input class="hide-sidebars" type="checkbox">专注模式：隐藏动态页侧栏</label>
-          <div class="actions">
-            <button class="button primary refresh-groups" type="button">刷新分组</button>
-            <button class="button clear-groups" type="button">清空分组条件</button>
-            <button class="button clear-hidden" type="button">恢复本地隐藏</button>
-            <button class="button export-settings" type="button">导出设置</button>
-            <button class="button import-settings" type="button">导入设置</button>
-            <button class="button danger reset-settings" type="button">恢复默认</button>
-            <input class="import-file" type="file" accept="application/json,.json" hidden>
+        </section>
+        <section class="section collapsible-section" data-section-id="layout">
+          <h3 class="section-title">
+            <button class="section-toggle" id="btf-toggle-layout" type="button" data-section-id="layout" aria-expanded="true" aria-controls="btf-section-layout">
+              <span class="section-title-label">界面与布局</span>
+              <span class="section-title-trailing"><span class="section-chevron" aria-hidden="true"></span></span>
+            </button>
+          </h3>
+          <div class="section-collapse" id="btf-section-layout" role="region" aria-labelledby="btf-toggle-layout" aria-hidden="false">
+            <div class="section-content"><div class="section-content-inner">
+              <div class="settings-grid">
+                <label class="field"><span>主题</span><select class="theme"><option value="auto">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
+                <label class="field"><span>入口位置</span><select class="launcher-corner"><option value="bottom-left">左下角</option><option value="bottom-right">右下角</option><option value="top-left">左上角</option><option value="top-right">右上角</option></select></label>
+                <label class="field"><span>展开方向</span><select class="panel-direction"><option value="auto">自动避让</option><option value="up">向上优先</option><option value="down">向下优先</option><option value="left">向左优先</option><option value="right">向右优先</option></select></label>
+                <label class="field"><span>卡片密度</span><select class="density"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></label>
+                <label class="field"><span>信息流宽度</span><select class="feed-width"><option value="default">原始</option><option value="wide">加宽</option></select></label>
+              </div>
+              <div class="font-toolbar" role="group" aria-label="界面字体大小">
+                <span class="font-toolbar-label">界面字号</span>
+                <button class="font-step font-decrease" type="button" aria-label="缩小界面字体" title="缩小字体">A−</button>
+                <input class="font-scale" id="btf-font-scale" type="range" min="${FONT_SCALE_MIN}" max="${FONT_SCALE_MAX}" step="${FONT_SCALE_STEP}" aria-label="界面字体大小">
+                <button class="font-step font-increase" type="button" aria-label="放大界面字体" title="放大字体">A+</button>
+                <button class="font-reset" type="button" aria-label="恢复默认字体大小" title="恢复 100%"><output class="font-scale-value" for="btf-font-scale">100%</output></button>
+              </div>
+              <label class="inline-check"><input class="hide-sidebars" type="checkbox">专注模式：隐藏动态页侧栏</label>
+              <div class="actions">
+                <button class="button primary refresh-groups" type="button">刷新分组</button>
+                <button class="button clear-groups" type="button">清空分组条件</button>
+                <button class="button clear-hidden" type="button">恢复本地隐藏</button>
+                <button class="button export-settings" type="button">导出设置</button>
+                <button class="button import-settings" type="button">导入设置</button>
+                <button class="button danger reset-settings" type="button">恢复默认</button>
+                <input class="import-file" type="file" accept="application/json,.json" hidden>
+              </div>
+            </div></div>
           </div>
         </section>
       </div>
@@ -611,6 +649,7 @@ function mountUi() {
     status: shadow.querySelector(".brand-status"),
     collapse: shadow.querySelector(".collapse"),
     enabled: shadow.querySelector(".enabled-switch"),
+    sectionToggles: [...shadow.querySelectorAll(".section-toggle[data-section-id]")],
     groups: shadow.querySelector(".groups"),
     groupSearch: shadow.querySelector(".group-search"),
     typeChips: shadow.querySelector(".type-chips"),
@@ -713,7 +752,7 @@ function positionPanel() {
   const panelWidth = Math.min(maximumWidth, Math.max(1, Number(rect.width) || Math.min(340, maximumWidth)));
   const panelHeight = Math.min(maximumHeight, Math.max(1, Number(rect.height) || Math.min(760, maximumHeight)));
   const placement = placePanel({
-    direction: state.settings.panelDirection,
+    direction: state.panelResolvedDirection ?? state.settings.panelDirection,
     anchor: state.launcherAnchor,
     panelWidth,
     panelHeight,
@@ -729,6 +768,7 @@ function positionPanel() {
   panel.style.right = "auto";
   panel.style.bottom = "auto";
   panel.dataset.direction = placement.direction;
+  state.panelResolvedDirection = placement.direction;
 }
 
 function schedulePanelPosition() {
@@ -742,8 +782,52 @@ function schedulePanelPosition() {
   });
 }
 
+function isSectionCollapsed(sectionId) {
+  return state.settings.collapsedSections.includes(sectionId);
+}
+
+function preferredPanelFocusTarget() {
+  if (!isSectionCollapsed("groups") && state.ui.groupSearch?.isConnected) {
+    return state.ui.groupSearch;
+  }
+  return state.ui.sectionToggles?.find((toggle) => toggle.dataset.sectionId === "groups")
+    ?? state.ui.enabled;
+}
+
+function renderCollapsibleSections() {
+  const activeElement = state.shadow?.activeElement;
+  for (const toggle of state.ui.sectionToggles ?? []) {
+    const sectionId = toggle.dataset.sectionId;
+    const collapsed = isSectionCollapsed(sectionId);
+    const section = toggle.closest(".collapsible-section");
+    const content = state.shadow?.getElementById(toggle.getAttribute("aria-controls"));
+    if (!section || !content) continue;
+    if (collapsed && activeElement && content.contains(activeElement)) {
+      toggle.focus({ preventScroll: true });
+    }
+    section.dataset.collapsed = String(collapsed);
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    const label = toggle.querySelector(".section-title-label")?.textContent?.trim() || "模块";
+    toggle.title = `${collapsed ? "展开" : "收起"}${label}`;
+    content.setAttribute("aria-hidden", String(collapsed));
+    content.toggleAttribute("inert", collapsed);
+  }
+}
+
+function toggleCollapsibleSection(sectionId) {
+  if (!COLLAPSIBLE_SECTIONS.includes(sectionId)) return;
+  const collapsed = new Set(state.settings.collapsedSections);
+  if (collapsed.has(sectionId)) collapsed.delete(sectionId);
+  else collapsed.add(sectionId);
+  state.settings.collapsedSections = COLLAPSIBLE_SECTIONS.filter((id) => collapsed.has(id));
+  saveSettings();
+  renderCollapsibleSections();
+  schedulePanelPosition();
+}
+
 function handleViewportChange() {
   if (!state.root?.isConnected) return;
+  state.panelResolvedDirection = null;
   applyLauncherPosition();
   schedulePanelPosition();
 }
@@ -751,6 +835,15 @@ function handleViewportChange() {
 function bindUiEvents() {
   const ui = state.ui;
   ui.launcher.addEventListener("click", () => setPanelOpen(true));
+  for (const toggle of ui.sectionToggles) {
+    toggle.addEventListener("click", () => toggleCollapsibleSection(toggle.dataset.sectionId));
+    const content = state.shadow.getElementById(toggle.getAttribute("aria-controls"));
+    content?.addEventListener("transitionend", (event) => {
+      if (event.target === content && event.propertyName === "grid-template-rows") {
+        schedulePanelPosition();
+      }
+    });
+  }
   window.addEventListener("resize", handleViewportChange);
   window.addEventListener("orientationchange", handleViewportChange);
   window.visualViewport?.addEventListener("resize", handleViewportChange);
@@ -821,6 +914,9 @@ function bindUiEvents() {
     element.addEventListener("change", () => {
       state.settings[property] = element.value;
       saveSettings();
+      if (property === "launcherCorner" || property === "panelDirection") {
+        state.panelResolvedDirection = null;
+      }
       applyLayoutSettings();
     });
   }
@@ -875,11 +971,12 @@ function setPanelOpen(open) {
   if (!shouldOpen && state.ui.drawer?.classList.contains("open")) {
     openWatchDrawer(false, { restoreFocus: false });
   }
+  if (state.settings.panelOpen !== shouldOpen) state.panelResolvedDirection = null;
   state.settings.panelOpen = shouldOpen;
   saveSettings();
   renderUi();
   window.setTimeout(() => {
-    if (shouldOpen) state.ui.groupSearch?.focus();
+    if (shouldOpen) preferredPanelFocusTarget()?.focus();
     else state.ui.launcher?.focus();
   }, 0);
 }
@@ -919,6 +1016,7 @@ function renderUi() {
   state.ui.feedWidth.value = state.settings.feedWidth;
   state.ui.hideSidebars.checked = state.settings.hideSidebars;
   state.ui.refreshGroups.disabled = !state.accountReady || state.loggedIn === false;
+  renderCollapsibleSections();
   renderGroups(state.ui.groupSearch.value);
   renderTypeChips();
   renderStats();
@@ -1779,7 +1877,7 @@ function hideToast({ restoreFocus = true } = {}) {
   if (hadFocus && restoreFocus) {
     const target = state.ui.drawer?.classList.contains("open")
       ? state.ui.closeWatch
-      : state.settings.panelOpen ? state.ui.groupSearch : state.ui.launcher;
+      : state.settings.panelOpen ? preferredPanelFocusTarget() : state.ui.launcher;
     window.setTimeout(() => target?.isConnected && target.focus(), 0);
   }
 }
@@ -1813,6 +1911,7 @@ async function importSettings(event) {
     state.keywordDraft = null;
     state.settings = normalizeSettings(payload?.settings ?? payload);
     state.settings.panelOpen = true;
+    state.panelResolvedDirection = null;
     saveSettings();
     renderUi();
     await ensureActiveGroups();
@@ -1871,6 +1970,7 @@ async function resetSettings() {
   state.keywordTimer = 0;
   state.keywordDraft = null;
   state.settings = normalizeSettings({ ...DEFAULT_SETTINGS, panelOpen });
+  state.panelResolvedDirection = null;
   saveSettings();
   window.clearTimeout(state.resetTimer);
   state.resetTimer = 0;
@@ -2074,6 +2174,7 @@ function suspendRoute() {
   state.bindFrame = 0;
   state.panelFrame = 0;
   state.launcherAnchor = null;
+  state.panelResolvedDirection = null;
   state.panelResizeObserver?.disconnect();
   state.panelResizeObserver = null;
   state.pendingCards.clear();

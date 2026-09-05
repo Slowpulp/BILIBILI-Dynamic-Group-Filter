@@ -11,6 +11,12 @@ export const LAUNCHER_CORNERS = Object.freeze([
   "top-left",
   "top-right",
 ]);
+export const COLLAPSIBLE_SECTIONS = Object.freeze([
+  "groups",
+  "types",
+  "keywords",
+  "layout",
+]);
 
 export const CARD_TYPES = Object.freeze([
   "video",
@@ -27,6 +33,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   panelOpen: false,
   launcherCorner: "bottom-right",
   panelDirection: "auto",
+  collapsedSections: [],
   fontScale: 100,
   theme: "auto",
   density: "comfortable",
@@ -40,6 +47,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
 });
 
 const VALID_LAUNCHER_CORNERS = new Set(LAUNCHER_CORNERS);
+const VALID_COLLAPSIBLE_SECTIONS = new Set(COLLAPSIBLE_SECTIONS);
 const VALID_PANEL_DIRECTIONS = new Set(["auto", "up", "down", "left", "right"]);
 const VALID_THEMES = new Set(["auto", "light", "dark"]);
 const VALID_DENSITIES = new Set(["comfortable", "compact"]);
@@ -85,6 +93,12 @@ export function normalizeLauncherCorner(value, {
     return `${vertical}-${horizontal}`;
   }
   return dock === "left" ? "bottom-left" : DEFAULT_SETTINGS.launcherCorner;
+}
+
+export function normalizeCollapsedSections(value) {
+  if (!Array.isArray(value)) return [];
+  const selected = new Set(value.filter((section) => VALID_COLLAPSIBLE_SECTIONS.has(section)));
+  return COLLAPSIBLE_SECTIONS.filter((section) => selected.has(section));
 }
 
 function normalizeGroupStates(raw) {
@@ -141,6 +155,7 @@ export function normalizeSettings(raw) {
     panelDirection: VALID_PANEL_DIRECTIONS.has(value.panelDirection)
       ? value.panelDirection
       : DEFAULT_SETTINGS.panelDirection,
+    collapsedSections: normalizeCollapsedSections(value.collapsedSections),
     fontScale: normalizeFontScale(value.fontScale),
     theme: VALID_THEMES.has(value.theme) ? value.theme : DEFAULT_SETTINGS.theme,
     density: VALID_DENSITIES.has(value.density) ? value.density : DEFAULT_SETTINGS.density,

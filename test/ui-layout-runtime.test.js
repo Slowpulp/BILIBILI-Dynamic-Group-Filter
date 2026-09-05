@@ -251,6 +251,104 @@ test("pointer drags and arrow keys cannot move a fixed corner, while resize and 
   destroyRuntime(runtime);
 });
 
+test("four modules collapse independently, preserve controls and focus, and restore together", async () => {
+  const runtime = await createRuntime({
+    settings: {
+      collapsedSections: ["keywords", "groups"],
+      hiddenTypes: ["video"],
+      keywords: ["抽奖"],
+    },
+  });
+  const { window, root, shadow } = runtime;
+  const toggles = new Map(
+    [...shadow.querySelectorAll(".section-toggle[data-section-id]")]
+      .map((toggle) => [toggle.dataset.sectionId, toggle]),
+  );
+  assert.deepEqual([...toggles.keys()], ["groups", "types", "keywords", "layout"]);
+
+  for (const sectionId of toggles.keys()) {
+    const toggle = toggles.get(sectionId);
+    const content = shadow.getElementById(toggle.getAttribute("aria-controls"));
+    const initiallyCollapsed = sectionId === "groups" || sectionId === "keywords";
+    assert.equal(toggle.tagName, "BUTTON");
+    assert.equal(toggle.getAttribute("aria-expanded"), String(!initiallyCollapsed));
+    assert.equal(content.getAttribute("aria-hidden"), String(initiallyCollapsed));
+    assert.equal(content.hasAttribute("inert"), initiallyCollapsed);
+    assert.equal(toggle.closest(".collapsible-section").dataset.collapsed, String(initiallyCollapsed));
+  }
+
+  shadow.querySelector(".launcher").click();
+  await waitFor(() => assert.equal(shadow.activeElement, toggles.get("groups")));
+
+  const videoChip = shadow.querySelector('.type-chips [data-type="video"]');
+  assert.equal(videoChip.getAttribute("aria-pressed"), "true");
+  videoChip.focus();
+  toggles.get("types").click();
+  assert.equal(shadow.activeElement, toggles.get("types"));
+  assert.deepEqual(savedSettings(window).collapsedSections, ["groups", "types", "keywords"]);
+
+  toggles.get("types").click();
+  assert.equal(videoChip.getAttribute("aria-pressed"), "true", "folding must not reset feature state");
+  assert.equal(shadow.querySelector(".keywords").value, "抽奖");
+  toggles.get("types").click();
+  toggles.get("layout").click();
+  assert.deepEqual(savedSettings(window).collapsedSections, ["groups", "types", "keywords", "layout"]);
+  assert.equal(shadow.querySelectorAll('.collapsible-section[data-collapsed="true"]').length, 4);
+
+  const persistedSettings = savedSettings(window);
+  destroyRuntime(runtime);
+
+  const restored = await createRuntime({ settings: persistedSettings });
+  for (const toggle of restored.shadow.querySelectorAll(".section-toggle[data-section-id]")) {
+    const content = restored.shadow.getElementById(toggle.getAttribute("aria-controls"));
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    assert.equal(content.getAttribute("aria-hidden"), "true");
+    assert.equal(content.hasAttribute("inert"), true);
+  }
+  restored.shadow.querySelector('[data-section-id="groups"].section-toggle').click();
+  assert.deepEqual(savedSettings(restored.window).collapsedSections, ["types", "keywords", "layout"]);
+  destroyRuntime(restored);
+});
+
+test("multi-section collapse keeps panel direction stable and recomputes its bounded position", async () => {
+  const runtime = await createRuntime();
+  const { root, shadow } = runtime;
+  const panel = shadow.querySelector(".panel");
+  panel.getBoundingClientRect = () => {
+    const collapsedCount = shadow.querySelectorAll('.collapsible-section[data-collapsed="true"]').length;
+    const height = 540 - collapsedCount * 100;
+    return {
+      left: 0,
+      top: 0,
+      right: 260,
+      bottom: height,
+      width: 260,
+      height,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    };
+  };
+  shadow.querySelector(".launcher").click();
+  const resolvedDirection = panel.dataset.direction;
+  const expandedTop = Number.parseFloat(panel.style.top);
+  assert.ok(["up", "left"].includes(resolvedDirection));
+
+  const toggles = [...shadow.querySelectorAll(".section-toggle[data-section-id]")];
+  toggles[0].click();
+  await waitFor(() => assert.equal(Number.parseFloat(panel.style.top), expandedTop + 100));
+  for (const toggle of toggles.slice(1)) toggle.click();
+  await waitFor(() => assert.equal(Number.parseFloat(panel.style.top), expandedTop + 400));
+  assert.equal(panel.dataset.direction, resolvedDirection);
+  assert.ok(Number.parseFloat(panel.style.left) >= 10);
+  assert.ok(Number.parseFloat(panel.style.left) + 260 <= 890);
+  assert.ok(Number.parseFloat(panel.style.top) >= 10);
+  assert.ok(Number.parseFloat(panel.style.top) + 140 <= 690);
+  assert.equal(root.dataset.open, "true");
+
+  destroyRuntime(runtime);
+});
+
 test("panel direction and font toolbar update layout, accessibility state, boundaries, and persistence", async () => {
   const runtime = await createRuntime();
   const { window, root, shadow } = runtime;

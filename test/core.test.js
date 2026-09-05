@@ -37,6 +37,7 @@ test('DEFAULT_SETTINGS is a safe baseline accepted by normalizeSettings', () => 
   assert.equal(DEFAULT_SETTINGS.enabled, true);
   assert.deepEqual(DEFAULT_SETTINGS.keywords, []);
   assert.deepEqual(DEFAULT_SETTINGS.hiddenTypes, []);
+  assert.deepEqual(DEFAULT_SETTINGS.collapsedSections, []);
   assert.deepEqual(DEFAULT_SETTINGS.groupStatesByUid, {});
   assert.ok(Number.isFinite(DEFAULT_SETTINGS.cacheHours));
   assert.ok(DEFAULT_SETTINGS.cacheHours > 0);
@@ -52,6 +53,7 @@ test('normalizeSettings validates storage values and migrates legacy group state
     dock: 'left',
     launcherPosition: null,
     panelDirection: 'auto',
+    collapsedSections: ['layout', 'groups', 'layout', 'unknown'],
     fontScale: 100,
     theme: 'dark',
     density: 'compact',
@@ -75,6 +77,7 @@ test('normalizeSettings validates storage values and migrates legacy group state
     panelOpen: true,
     launcherCorner: 'top-left',
     panelDirection: 'auto',
+    collapsedSections: ['groups', 'layout'],
     fontScale: 100,
     theme: 'dark',
     density: 'compact',
@@ -90,6 +93,15 @@ test('normalizeSettings validates storage values and migrates legacy group state
     cacheHours: 72,
   });
   assert.equal('unexpectedKey' in normalized, false);
+});
+
+test('normalizeSettings keeps only canonical collapsible section identifiers', () => {
+  assert.deepEqual(
+    normalizeSettings({ collapsedSections: ['layout', 'types', 'groups', 'types', null, 'future'] }).collapsedSections,
+    ['groups', 'types', 'layout'],
+  );
+  assert.deepEqual(normalizeSettings({ collapsedSections: 'groups' }).collapsedSections, []);
+  assert.deepEqual(normalizeSettings({}).collapsedSections, []);
 });
 
 test('normalizeSettings validates fixed launcher corners, migrates legacy positions, and snaps font scaling', () => {

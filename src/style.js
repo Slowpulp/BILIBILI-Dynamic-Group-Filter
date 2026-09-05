@@ -373,9 +373,53 @@ export const PANEL_STYLE = String.raw`
   }
 
   .section:first-child { margin-top: 0; border-top: 0; }
-  .section-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
-  .section-title h3 { margin: 0; color: var(--text-2); font-size: 1em; font-weight: 700; }
-  .section-hint { color: var(--text-3); font-size: .833em; }
+  .section-title { margin: 0; font: inherit; }
+  .section-toggle {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    min-height: 28px;
+    padding: 2px 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-2);
+    cursor: pointer;
+    text-align: left;
+  }
+  .section-title-label { min-width: 0; flex: 1; font-size: 1em; font-weight: 700; line-height: 1.4; }
+  .section-title-trailing { min-width: 0; max-width: 68%; display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+  .section-hint { min-width: 0; overflow: hidden; color: var(--text-3); font-size: .833em; text-overflow: ellipsis; white-space: nowrap; }
+  .section-chevron {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 auto;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform 180ms ease;
+  }
+  .section-toggle:hover { color: var(--text); }
+  .section-collapse {
+    display: grid;
+    grid-template-rows: 1fr;
+    opacity: 1;
+    visibility: visible;
+    transition: grid-template-rows 180ms ease, opacity 140ms ease, visibility 0s linear 0s;
+  }
+  .section-content { min-height: 0; overflow: hidden; }
+  .section-content-inner { min-width: 0; padding-top: 9px; }
+  .collapsible-section[data-collapsed="true"] .section-collapse {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    visibility: hidden;
+    transition: grid-template-rows 180ms ease, opacity 140ms ease, visibility 0s linear 0s;
+  }
+  .collapsible-section[data-collapsed="true"] .section-hint { display: none; }
+  .collapsible-section[data-collapsed="true"] .section-chevron { transform: rotate(-45deg); }
 
   .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .switch-copy strong { display: block; font-size: 1.083em; }

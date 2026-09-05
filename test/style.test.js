@@ -33,6 +33,16 @@ test("fixed-corner launcher remains an ordinary button beside a viewport-positio
   assert.doesNotMatch(PANEL_STYLE, /data-dock/);
 });
 
+test("collapsible modules animate intrinsic height without leaving focusable layout gaps", () => {
+  assert.match(PANEL_STYLE, /\.section-title\s*\{[^}]*margin:\s*0;[^}]*font:\s*inherit;/s);
+  assert.match(PANEL_STYLE, /\.section-toggle\s*\{[^}]*display:\s*flex;[^}]*width:\s*100%;[^}]*cursor:\s*pointer;/s);
+  assert.match(PANEL_STYLE, /\.section-collapse\s*\{[^}]*display:\s*grid;[^}]*grid-template-rows:\s*1fr;[^}]*transition:\s*grid-template-rows\s+180ms/s);
+  assert.match(PANEL_STYLE, /\.section-content\s*\{\s*min-height:\s*0;\s*overflow:\s*hidden;/s);
+  assert.match(PANEL_STYLE, /\.collapsible-section\[data-collapsed="true"\] \.section-collapse\s*\{[^}]*grid-template-rows:\s*0fr;[^}]*visibility:\s*hidden;[^}]*visibility\s+0s\s+linear\s+0s;/s);
+  assert.match(PANEL_STYLE, /\.collapsible-section\[data-collapsed="true"\] \.section-hint\s*\{\s*display:\s*none;/s);
+  assert.match(PANEL_STYLE, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*transition-duration:\s*\.01ms\s*!important;/s);
+});
+
 test("font controls scale panel text without scaling the launcher icon", () => {
   assert.match(PANEL_STYLE, /:host\s*\{[^}]*font-size:\s*var\(--btf-ui-font-size, 12px\);/s);
   assert.match(PANEL_STYLE, /\.font-toolbar\s*\{[^}]*display:\s*grid;/s);
