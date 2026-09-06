@@ -11,7 +11,6 @@ import {
   normalizeFontScale,
   normalizeGroupCache,
   normalizeSettings,
-  parseKeywords,
   pruneHiddenRecords,
   sameWatchItem,
   watchKey,
@@ -24,7 +23,7 @@ import {
 } from "./layout.js";
 import { GLOBAL_STYLE, PANEL_STYLE } from "./style.js";
 
-const VERSION = "2.1.1";
+const VERSION = "3.0.0";
 const STORAGE_PREFIX = "__bilibili_timeline_focus_v1__";
 const ROOT_ID = "btf-root";
 const GLOBAL_STYLE_ID = "btf-global-style";
@@ -234,6 +233,7 @@ const state = {
   bodyObserver: null,
   pendingCards: new Set(),
   scanFrame: 0,
+  statsFrame: 0,
   bindFrame: 0,
   refilterToken: 0,
   cardSignatures: new WeakMap(),
@@ -241,10 +241,10 @@ const state = {
   emptyNotice: null,
   status: { kind: "idle", message: "正在启动…" },
   stats: { total: 0, visible: 0, hidden: 0, unknown: 0 },
+  viewMode: "normal",
+  hiddenReasonSequence: 0,
   toastTimer: 0,
   toastUndo: null,
-  keywordTimer: 0,
-  keywordDraft: null,
   resetArmedUntil: 0,
   clearHiddenArmedUntil: 0,
   resetTimer: 0,
@@ -298,17 +298,6 @@ function saveSettings() {
   Storage.write("settings", state.settings);
 }
 
-function commitKeywordDraft({ refilter = true } = {}) {
-  if (state.keywordDraft == null) return false;
-  window.clearTimeout(state.keywordTimer);
-  state.keywordTimer = 0;
-  state.settings.keywords = parseKeywords(state.keywordDraft, { caseSensitive: state.settings.caseSensitive });
-  state.keywordDraft = null;
-  saveSettings();
-  if (refilter) void refilterAll();
-  return true;
-}
-
 function saveGroupCache() {
   if (!state.uid) return;
   state.groupCache = normalizeGroupCache(state.groupCache);
@@ -349,6 +338,7 @@ function abortGroupLoads() {
 }
 
 function resetAccountForDetection() {
+  setHiddenOnlyView(false, { announce: false });
   abortGroupLoads();
   state.uid = null;
   state.loggedIn = null;
@@ -369,7 +359,7 @@ function resetAccountForDetection() {
 function clearAccountScopedCardUi() {
   for (const wrapper of document.querySelectorAll(SELECTORS.wrapper)) {
     const reason = wrapper.dataset.btfHiddenReason;
-    if (reason === "manual" || reason === "group") delete wrapper.dataset.btfHiddenReason;
+    if (reason === "manual" || reason === "group") clearHiddenDecision(wrapper);
     const watch = wrapper.querySelector(".btf-card-action[data-action='watch']");
     const hide = wrapper.querySelector(".btf-card-action[data-action='hide']");
     if (hide) {
@@ -411,6 +401,7 @@ function transitionAccount(nextUid, loggedIn) {
   const sessionStatusChanged = state.loggedIn !== loggedIn;
   const shouldReload = identityChanged || !state.accountReady;
   if (identityChanged) {
+    setHiddenOnlyView(false, { announce: false });
     abortGroupLoads();
     state.sessionHiddenWrappers = new WeakSet();
     state.sessionHiddenStableIds = new WeakMap();
@@ -523,7 +514,7 @@ function staticPanelMarkup() {
       </header>
       <div class="stats" aria-label="筛选统计">
         <div class="stat"><strong data-stat="visible">0</strong><span>显示</span></div>
-        <div class="stat hidden"><strong data-stat="hidden">0</strong><span>隐藏</span></div>
+        <button class="stat stat-button hidden hidden-view-toggle" type="button" aria-label="没有隐藏动态" aria-pressed="false" disabled title="没有可查看的隐藏动态"><strong data-stat="hidden">0</strong><span>隐藏</span></button>
         <div class="stat unknown"><strong data-stat="unknown">0</strong><span>待识别</span></div>
       </div>
       <div class="scroll-area">
@@ -563,17 +554,27 @@ function staticPanelMarkup() {
             </div></div>
           </div>
         </section>
-        <section class="section collapsible-section" data-section-id="keywords">
+        <section class="section collapsible-section" data-section-id="promotion">
           <h3 class="section-title">
-            <button class="section-toggle" id="btf-toggle-keywords" type="button" data-section-id="keywords" aria-expanded="true" aria-controls="btf-section-keywords">
-              <span class="section-title-label">关键词屏蔽</span>
-              <span class="section-title-trailing"><span class="section-hint">每行一个 · 普通文本</span><span class="section-chevron" aria-hidden="true"></span></span>
+            <button class="section-toggle" id="btf-toggle-promotion" type="button" data-section-id="promotion" aria-expanded="true" aria-controls="btf-section-promotion">
+              <span class="section-title-label">推广与抽奖</span>
+              <span class="section-title-trailing"><span class="section-hint">组合信号识别</span><span class="section-chevron" aria-hidden="true"></span></span>
             </button>
           </h3>
-          <div class="section-collapse" id="btf-section-keywords" role="region" aria-labelledby="btf-toggle-keywords" aria-hidden="false">
+          <div class="section-collapse" id="btf-section-promotion" role="region" aria-labelledby="btf-toggle-promotion" aria-hidden="false">
             <div class="section-content"><div class="section-content-inner">
-              <textarea class="keywords" maxlength="10099" placeholder="例如：抽奖&#10;带货&#10;剧透" aria-label="关键词屏蔽规则"></textarea>
-              <label class="inline-check"><input class="case-sensitive" type="checkbox">区分大小写</label>
+              <div class="promotion-options">
+                <div class="switch-row promotion-option">
+                  <div class="switch-copy"><strong>屏蔽推广动态</strong><span>识别商品卡、购买引导和促销组合信号</span></div>
+                  <button class="switch promotion-switch" type="button" role="switch" aria-label="屏蔽推广动态" aria-checked="true"></button>
+                </div>
+                <div class="switch-row promotion-option">
+                  <div class="switch-copy"><strong>屏蔽互动抽奖</strong><span>识别抽奖行为、参与条件与开奖信息</span></div>
+                  <button class="switch giveaway-switch" type="button" role="switch" aria-label="屏蔽互动抽奖" aria-checked="true"></button>
+                </div>
+                <label class="field suspicious-field"><span>疑似内容处理</span><select class="suspicious-action" aria-label="疑似推广或抽奖内容处理方式"><option value="collapse">折叠，可手动展开</option><option value="show">正常显示</option></select></label>
+                <p class="promotion-note">根据多项特征综合判断；单独出现“价格”或“抽奖”等词不会触发。</p>
+              </div>
             </div></div>
           </div>
         </section>
@@ -649,12 +650,14 @@ function mountUi() {
     status: shadow.querySelector(".brand-status"),
     collapse: shadow.querySelector(".collapse"),
     enabled: shadow.querySelector(".enabled-switch"),
+    hiddenViewToggle: shadow.querySelector(".hidden-view-toggle"),
     sectionToggles: [...shadow.querySelectorAll(".section-toggle[data-section-id]")],
     groups: shadow.querySelector(".groups"),
     groupSearch: shadow.querySelector(".group-search"),
     typeChips: shadow.querySelector(".type-chips"),
-    keywords: shadow.querySelector(".keywords"),
-    caseSensitive: shadow.querySelector(".case-sensitive"),
+    promotionEnabled: shadow.querySelector(".promotion-switch"),
+    giveawayEnabled: shadow.querySelector(".giveaway-switch"),
+    suspiciousAction: shadow.querySelector(".suspicious-action"),
     theme: shadow.querySelector(".theme"),
     launcherCorner: shadow.querySelector(".launcher-corner"),
     panelDirection: shadow.querySelector(".panel-direction"),
@@ -835,6 +838,9 @@ function handleViewportChange() {
 function bindUiEvents() {
   const ui = state.ui;
   ui.launcher.addEventListener("click", () => setPanelOpen(true));
+  ui.hiddenViewToggle.addEventListener("click", () => {
+    setHiddenOnlyView(state.viewMode !== "hidden");
+  });
   for (const toggle of ui.sectionToggles) {
     toggle.addEventListener("click", () => toggleCollapsibleSection(toggle.dataset.sectionId));
     const content = state.shadow.getElementById(toggle.getAttribute("aria-controls"));
@@ -851,6 +857,7 @@ function bindUiEvents() {
   ui.collapse.addEventListener("click", () => setPanelOpen(false));
   ui.enabled.addEventListener("click", () => {
     state.settings.enabled = !state.settings.enabled;
+    if (!state.settings.enabled) setHiddenOnlyView(false, { announce: false });
     saveSettings();
     renderUi();
     void refilterAll();
@@ -894,15 +901,21 @@ function bindUiEvents() {
     renderTypeChips();
     void refilterAll();
   });
-  ui.keywords.addEventListener("input", () => {
-    state.keywordDraft = ui.keywords.value;
-    window.clearTimeout(state.keywordTimer);
-    state.keywordTimer = window.setTimeout(() => commitKeywordDraft(), 220);
-  });
-  ui.caseSensitive.addEventListener("change", () => {
-    state.settings.caseSensitive = ui.caseSensitive.checked;
-    state.keywordDraft = ui.keywords.value;
-    commitKeywordDraft();
+  for (const [element, property] of [
+    [ui.promotionEnabled, "promotionEnabled"],
+    [ui.giveawayEnabled, "giveawayEnabled"],
+  ]) {
+    element.addEventListener("click", () => {
+      state.settings[property] = !state.settings[property];
+      saveSettings();
+      renderPromotionSettings();
+      void refilterAll();
+    });
+  }
+  ui.suspiciousAction.addEventListener("change", () => {
+    state.settings.suspiciousAction = ui.suspiciousAction.value;
+    saveSettings();
+    void refilterAll();
   });
   for (const [element, property] of [
     [ui.theme, "theme"],
@@ -1007,8 +1020,6 @@ function renderUi() {
   state.ui.panel.setAttribute("aria-hidden", String(!state.settings.panelOpen));
   state.ui.enabled.setAttribute("aria-checked", String(state.settings.enabled));
   state.ui.status.textContent = state.status.message;
-  state.ui.keywords.value = state.keywordDraft ?? state.settings.keywords.join("\n");
-  state.ui.caseSensitive.checked = state.settings.caseSensitive;
   state.ui.theme.value = state.settings.theme;
   state.ui.launcherCorner.value = state.settings.launcherCorner;
   state.ui.panelDirection.value = state.settings.panelDirection;
@@ -1019,11 +1030,19 @@ function renderUi() {
   renderCollapsibleSections();
   renderGroups(state.ui.groupSearch.value);
   renderTypeChips();
+  renderPromotionSettings();
   renderStats();
   renderCacheInfo();
   renderWatchLater();
   renderFontScaleControls();
   applyLayoutSettings();
+}
+
+function renderPromotionSettings() {
+  if (!state.ui.promotionEnabled) return;
+  state.ui.promotionEnabled.setAttribute("aria-checked", String(state.settings.promotionEnabled));
+  state.ui.giveawayEnabled.setAttribute("aria-checked", String(state.settings.giveawayEnabled));
+  state.ui.suspiciousAction.value = state.settings.suspiciousAction === "show" ? "show" : "collapse";
 }
 
 function renderFontScaleControls() {
@@ -1129,6 +1148,51 @@ function renderGroups(search = "") {
   }
 }
 
+function applyViewMode() {
+  const hiddenView = state.viewMode === "hidden" && state.routeActive && state.settings.enabled;
+  state.viewMode = hiddenView ? "hidden" : "normal";
+  if (hiddenView) document.documentElement.dataset.btfViewMode = "hidden";
+  else delete document.documentElement.dataset.btfViewMode;
+  if (state.root) state.root.dataset.viewMode = state.viewMode;
+
+  for (const hide of document.querySelectorAll(".btf-card-action[data-action='hide']")) {
+    const wrapper = hide.closest(SELECTORS.wrapper);
+    if (wrapper) updateHideButton(wrapper);
+  }
+
+  const button = state.ui.hiddenViewToggle;
+  if (!button) return;
+  button.setAttribute("aria-pressed", String(hiddenView));
+  button.disabled = !state.settings.enabled || (!hiddenView && state.stats.hidden === 0);
+  if (hiddenView) {
+    button.setAttribute("aria-label", `退出只看隐藏动态，当前已加载 ${state.stats.hidden} 条`);
+    button.title = "恢复显示未被隐藏的动态";
+  } else if (state.stats.hidden > 0) {
+    button.setAttribute("aria-label", `只看 ${state.stats.hidden} 条隐藏动态`);
+    button.title = "只显示当前已加载的隐藏动态";
+  } else {
+    button.setAttribute("aria-label", "没有隐藏动态");
+    button.title = "没有可查看的隐藏动态";
+  }
+}
+
+function setHiddenOnlyView(showHidden, { announce = true } = {}) {
+  const nextHidden = Boolean(showHidden);
+  // A list removal may arrive immediately before the click. Recount the live
+  // DOM synchronously so a stale tile cannot open an empty hidden-only view.
+  if (nextHidden) updateStats();
+  if (nextHidden && (!state.routeActive || !state.settings.enabled || state.stats.hidden === 0)) return false;
+  state.viewMode = nextHidden ? "hidden" : "normal";
+  applyViewMode();
+  updateEmptyNotice();
+  if (announce) {
+    showToast(nextHidden
+      ? `正在只看当前已加载的 ${state.stats.hidden} 条隐藏动态`
+      : "已恢复显示未被隐藏的动态");
+  }
+  return true;
+}
+
 function renderStats() {
   if (!state.shadow) return;
   for (const [key, value] of Object.entries({
@@ -1141,6 +1205,7 @@ function renderStats() {
   }
   state.ui.badge.textContent = String(state.stats.hidden);
   state.ui.badge.hidden = state.stats.hidden === 0;
+  applyViewMode();
 }
 
 function renderCacheInfo() {
@@ -1177,6 +1242,7 @@ function clearLayoutSettings() {
   delete html.dataset.btfDensity;
   delete html.dataset.btfWidth;
   delete html.dataset.btfFocus;
+  delete html.dataset.btfViewMode;
   html.style.removeProperty("--btf-card-action-font-size");
   html.style.removeProperty("--btf-empty-font-size");
   html.style.removeProperty("--btf-card-icon-font-size");
@@ -1287,7 +1353,7 @@ async function ensureGroupLoaded(groupId, { force = false } = {}) {
       if (!accountCookieStillCurrent(expectedCookie)) return hadCachedMembers;
       if (error.code === -101 && state.routeActive && generation === state.routeGeneration && state.uid === expectedUid) {
         transitionAccount(null, false);
-        setStatus("login", "登录状态已失效；关键词和类型筛选仍可使用");
+        setStatus("login", "登录状态已失效；类型与推广抽奖筛选仍可使用");
         renderUi();
         void refilterAll();
         return false;
@@ -1384,7 +1450,7 @@ function mergeTags(tags) {
 }
 
 function friendlyApiMessage(error, fallback) {
-  if (error?.code === -101) return "请先登录 B 站；关键词和类型筛选仍可使用";
+  if (error?.code === -101) return "请先登录 B 站；类型与推广抽奖筛选仍可使用";
   if (error?.status === 412 || error?.code === -352 || error?.code === -401) return "B站请求受限，已停止重试并保留缓存";
   if (error?.code === "TIMEOUT") return "B站接口响应超时，已保留缓存";
   if (error?.code === "NETWORK") return "当前网络不可用，已保留缓存";
@@ -1507,6 +1573,16 @@ function flushCardQueue() {
   updateStats();
 }
 
+function queueStatsUpdate() {
+  if (state.statsFrame || !state.routeActive || state.destroyed) return;
+  const generation = state.routeGeneration;
+  state.statsFrame = requestAnimationFrame(() => {
+    state.statsFrame = 0;
+    if (!state.routeActive || state.destroyed || generation !== state.routeGeneration) return;
+    updateStats();
+  });
+}
+
 function processCardSafely(wrapper, options) {
   try {
     processCard(wrapper, options);
@@ -1514,8 +1590,9 @@ function processCardSafely(wrapper, options) {
     return true;
   } catch (error) {
     if (wrapper?.dataset) {
-      delete wrapper.dataset.btfHiddenReason;
+      clearHiddenDecision(wrapper);
       delete wrapper.dataset.btfAuthorKnown;
+      clearCollapsedCard(wrapper);
     }
     state.cardSignatures.delete(wrapper);
     if (wrapper && !state.cardErrors.has(wrapper)) {
@@ -1529,6 +1606,12 @@ function processCardSafely(wrapper, options) {
 function processCard(wrapper, { force = false } = {}) {
   if (!wrapper?.isConnected || !wrapper.matches?.(SELECTORS.wrapper)) return;
   const model = extractCardModel(wrapper, location.href);
+  let contentSignalsSignature = "";
+  try {
+    contentSignalsSignature = fnv1a(JSON.stringify(model.contentSignals ?? null));
+  } catch {
+    contentSignalsSignature = "unavailable";
+  }
   const signature = [
     model.identity,
     model.authorMid,
@@ -1538,14 +1621,27 @@ function processCard(wrapper, { force = false } = {}) {
     model.linkKnown,
     model.primaryUrl,
     model.relatedUrls.join(","),
+    contentSignalsSignature,
     fnv1a(model.text),
   ].join("|");
   const existingToolbar = wrapper.querySelector(".btf-card-tools");
+  const collapseUiCurrent = !wrapper.hasAttribute("data-btf-collapsed-reason")
+    || Boolean(wrapper.querySelector(":scope > .btf-card-collapse-toggle"));
+  const hiddenDescriptionId = wrapper.dataset.btfHiddenDescriptionId;
+  const hiddenDescription = wrapper.querySelector(":scope > .btf-hidden-reason");
+  const hiddenUiCurrent = !wrapper.hasAttribute("data-btf-hidden-reason")
+    || Boolean(
+      hiddenDescriptionId
+      && hiddenDescription?.id === hiddenDescriptionId
+      && (wrapper.getAttribute("aria-describedby") || "").split(/\s+/).includes(hiddenDescriptionId),
+    );
   if (
     !force
     && state.cardSignatures.get(wrapper) === signature
     && existingToolbar
     && cardToolbarPlacementIsCurrent(wrapper, existingToolbar)
+    && collapseUiCurrent
+    && hiddenUiCurrent
   ) return;
   state.cardSignatures.set(wrapper, signature);
   wrapper.dataset.btfAuthorKnown = String(Boolean(model.authorMid));
@@ -1591,9 +1687,124 @@ function hiddenWrapperIsContinuous(origin, model, trackedStableIdentity) {
   return true;
 }
 
+function hiddenReasonLabel(reason) {
+  switch (reason) {
+    case "manual": return "本地手动隐藏";
+    case "group": return "关注分组";
+    case "type": return "内容类型";
+    case "promotion": return "商品推广";
+    case "giveaway": return "互动抽奖";
+    default: return "筛选规则";
+  }
+}
+
+function setHiddenDecision(wrapper, reason, detail = "") {
+  const normalizedReason = String(reason || "filtered");
+  const normalizedDetail = String(detail || "").replace(/\s+/g, " ").trim().slice(0, 120);
+  const description = `隐藏原因：${hiddenReasonLabel(normalizedReason)}${normalizedDetail ? ` · ${normalizedDetail}` : ""}`;
+  wrapper.dataset.btfHiddenReason = normalizedReason;
+  wrapper.dataset.btfHiddenDetail = description;
+
+  let descriptionId = wrapper.dataset.btfHiddenDescriptionId;
+  const duplicateId = descriptionId ? document.getElementById(descriptionId) : null;
+  if (!descriptionId || duplicateId && duplicateId.parentElement !== wrapper) {
+    descriptionId = `btf-hidden-reason-${++state.hiddenReasonSequence}`;
+    wrapper.dataset.btfHiddenDescriptionId = descriptionId;
+  }
+  let reasonNode = wrapper.querySelector(":scope > .btf-hidden-reason");
+  if (!reasonNode) {
+    reasonNode = document.createElement("div");
+    reasonNode.className = "btf-hidden-reason";
+    reasonNode.dataset.btfOwned = "hidden-reason";
+    reasonNode.setAttribute("role", "note");
+    wrapper.insertBefore(reasonNode, wrapper.firstChild);
+  }
+  reasonNode.id = descriptionId;
+  reasonNode.textContent = description;
+  const describedBy = new Set((wrapper.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+  describedBy.add(descriptionId);
+  wrapper.setAttribute("aria-describedby", [...describedBy].join(" "));
+}
+
+function clearHiddenDecision(wrapper) {
+  if (!wrapper?.dataset) return;
+  const descriptionId = wrapper.dataset.btfHiddenDescriptionId;
+  if (descriptionId) {
+    const describedBy = (wrapper.getAttribute("aria-describedby") || "")
+      .split(/\s+/)
+      .filter((token) => token && token !== descriptionId);
+    if (describedBy.length) wrapper.setAttribute("aria-describedby", describedBy.join(" "));
+    else wrapper.removeAttribute("aria-describedby");
+  }
+  delete wrapper.dataset.btfHiddenReason;
+  delete wrapper.dataset.btfHiddenDetail;
+  delete wrapper.dataset.btfHiddenDescriptionId;
+  wrapper.querySelector?.(":scope > .btf-hidden-reason")?.remove();
+}
+
+function collapsedReasonLabel(reason) {
+  if (reason === "giveaway") return "疑似互动抽奖";
+  if (reason === "promotion") return "疑似推广";
+  return "疑似需要过滤的内容";
+}
+
+function updateCollapsedCardToggle(wrapper) {
+  const toggle = wrapper.querySelector(":scope > .btf-card-collapse-toggle");
+  if (!toggle) return;
+  const expanded = wrapper.dataset.btfCollapsedExpanded === "true";
+  const label = collapsedReasonLabel(wrapper.dataset.btfCollapsedReason);
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.textContent = expanded ? `${label} · 点击收起` : `${label}，已折叠 · 点击展开`;
+  const detail = wrapper.dataset.btfCollapsedDetail;
+  toggle.title = `${expanded ? "收起这条动态" : "临时展开这条动态"}${detail ? `；判断依据：${detail}` : ""}`;
+}
+
+function collapseCard(wrapper, decision, model) {
+  const reason = String(decision?.reason || "suspicious");
+  const identity = String(model?.identity || "unknown");
+  if (
+    wrapper.dataset.btfCollapsedReason !== reason
+    || wrapper.dataset.btfCollapsedIdentity !== identity
+  ) {
+    delete wrapper.dataset.btfCollapsedExpanded;
+  }
+  wrapper.dataset.btfCollapsedReason = reason;
+  wrapper.dataset.btfCollapsedIdentity = identity;
+  wrapper.dataset.btfCollapsedDetail = String(decision?.detail || "").replace(/\s+/g, " ").trim().slice(0, 120);
+  let toggle = wrapper.querySelector(":scope > .btf-card-collapse-toggle");
+  if (!toggle) {
+    toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "btf-card-collapse-toggle";
+    toggle.dataset.btfOwned = "collapse-toggle";
+    toggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      wrapper.dataset.btfCollapsedExpanded = String(wrapper.dataset.btfCollapsedExpanded !== "true");
+      updateCollapsedCardToggle(wrapper);
+    });
+    wrapper.insertBefore(toggle, wrapper.firstChild);
+  }
+  updateCollapsedCardToggle(wrapper);
+}
+
+function clearCollapsedCard(wrapper) {
+  if (!wrapper) return;
+  const toggle = wrapper.querySelector?.(":scope > .btf-card-collapse-toggle");
+  if (toggle && (document.activeElement === toggle || toggle.contains(document.activeElement))) {
+    state.ui.launcher?.focus({ preventScroll: true });
+  }
+  delete wrapper.dataset.btfCollapsedReason;
+  delete wrapper.dataset.btfCollapsedIdentity;
+  delete wrapper.dataset.btfCollapsedDetail;
+  delete wrapper.dataset.btfCollapsedExpanded;
+  toggle?.remove();
+}
+
 function applyCardDecision(wrapper, model) {
   if (!state.settings.enabled) {
-    delete wrapper.dataset.btfHiddenReason;
+    clearHiddenDecision(wrapper);
+    clearCollapsedCard(wrapper);
     return;
   }
   if (state.sessionHiddenWrappers.has(wrapper)) {
@@ -1613,7 +1824,8 @@ function applyCardDecision(wrapper, model) {
         origin.migratedIdentity = model.identity;
         saveHiddenRecords();
       }
-      wrapper.dataset.btfHiddenReason = "manual";
+      clearCollapsedCard(wrapper);
+      setHiddenDecision(wrapper, "manual");
       return;
     }
   }
@@ -1624,8 +1836,15 @@ function applyCardDecision(wrapper, model) {
     authorGroupsMap: groupMap,
     hiddenRecords: state.hiddenRecords,
   });
-  if (decision.visible) delete wrapper.dataset.btfHiddenReason;
-  else wrapper.dataset.btfHiddenReason = decision.reason;
+  const action = decision?.action ?? (decision?.visible === false ? "hide" : "show");
+  if (action === "collapse") {
+    clearHiddenDecision(wrapper);
+    collapseCard(wrapper, decision, model);
+    return;
+  }
+  clearCollapsedCard(wrapper);
+  if (action === "hide") setHiddenDecision(wrapper, decision.reason, decision.detail);
+  else clearHiddenDecision(wrapper);
 }
 
 function actionButton(icon, label, action) {
@@ -1731,6 +1950,10 @@ function enhanceCard(wrapper) {
 }
 
 function hideCard(wrapper, { focusUndo = false } = {}) {
+  if (state.viewMode === "hidden") {
+    showToast("只看隐藏动态时不可再次隐藏；请先退出该视图");
+    return;
+  }
   if (!requireCurrentAccount()) return;
   const model = extractCardModel(wrapper, location.href);
   const hiddenOrigin = hiddenOriginFromModel(model);
@@ -1792,16 +2015,28 @@ function toggleWatchLater(wrapper) {
   renderWatchLater();
 }
 
+function updateHideButton(wrapper) {
+  const hide = wrapper.querySelector(".btf-card-action[data-action='hide']");
+  if (!hide) return;
+  if (!state.accountReady) {
+    hide.disabled = true;
+    hide.title = "正在确认账号";
+  } else if (state.viewMode === "hidden") {
+    hide.disabled = true;
+    hide.title = "只看隐藏动态时不可再次隐藏";
+  } else {
+    hide.disabled = false;
+    hide.title = "隐藏";
+  }
+  hide.setAttribute("aria-label", hide.title);
+}
+
 function updateWatchButton(wrapper, model = extractCardModel(wrapper, location.href)) {
   const button = wrapper.querySelector(".btf-card-action[data-action='watch']");
   const hide = wrapper.querySelector(".btf-card-action[data-action='hide']");
   if (!button && !hide) return;
+  updateHideButton(wrapper);
   if (!state.accountReady) {
-    if (hide) {
-      hide.disabled = true;
-      hide.title = "正在确认账号";
-      hide.setAttribute("aria-label", hide.title);
-    }
     if (button) {
       button.disabled = true;
       button.setAttribute("aria-pressed", "false");
@@ -1810,11 +2045,6 @@ function updateWatchButton(wrapper, model = extractCardModel(wrapper, location.h
       button.querySelector(".btf-icon").textContent = "☆";
     }
     return;
-  }
-  if (hide) {
-    hide.disabled = false;
-    hide.title = "隐藏";
-    hide.setAttribute("aria-label", hide.title);
   }
   if (!button) return;
   if (!model.linkKnown) {
@@ -1948,7 +2178,6 @@ function hideToast({ restoreFocus = true } = {}) {
 }
 
 function exportSettings() {
-  commitKeywordDraft();
   const payload = {
     product: "B站动态净览",
     schemaVersion: SCHEMA_VERSION,
@@ -1971,9 +2200,7 @@ async function importSettings(event) {
   if (!file) return;
   try {
     const payload = JSON.parse(await file.text());
-    window.clearTimeout(state.keywordTimer);
-    state.keywordTimer = 0;
-    state.keywordDraft = null;
+    setHiddenOnlyView(false, { announce: false });
     state.settings = normalizeSettings(payload?.settings ?? payload);
     state.settings.panelOpen = true;
     state.panelResolvedDirection = null;
@@ -2031,9 +2258,7 @@ async function resetSettings() {
     return;
   }
   const panelOpen = true;
-  window.clearTimeout(state.keywordTimer);
-  state.keywordTimer = 0;
-  state.keywordDraft = null;
+  setHiddenOnlyView(false, { announce: false });
   state.settings = normalizeSettings({ ...DEFAULT_SETTINGS, panelOpen });
   state.panelResolvedDirection = null;
   saveSettings();
@@ -2070,6 +2295,10 @@ async function refilterAll() {
 }
 
 function updateStats() {
+  if (state.statsFrame) {
+    cancelAnimationFrame(state.statsFrame);
+    state.statsFrame = 0;
+  }
   const wrappers = [...document.querySelectorAll(SELECTORS.wrapper)];
   const hidden = wrappers.filter((wrapper) => wrapper.hasAttribute("data-btf-hidden-reason")).length;
   const groupFiltering = activeGroupIds().length > 0;
@@ -2088,7 +2317,12 @@ function updateStats() {
 
 function updateEmptyNotice() {
   if (!state.list?.isConnected) return;
-  const shouldShow = state.settings.enabled && state.stats.total > 0 && state.stats.visible === 0;
+  const hiddenViewEmpty = state.settings.enabled && state.viewMode === "hidden" && state.stats.hidden === 0;
+  const normalViewEmpty = state.settings.enabled
+    && state.viewMode === "normal"
+    && state.stats.total > 0
+    && state.stats.visible === 0;
+  const shouldShow = hiddenViewEmpty || normalViewEmpty;
   if (!shouldShow) {
     state.emptyNotice?.remove();
     state.emptyNotice = null;
@@ -2097,10 +2331,13 @@ function updateEmptyNotice() {
   if (!state.emptyNotice?.isConnected) {
     const notice = document.createElement("div");
     notice.className = "btf-feed-empty";
-    notice.textContent = "当前条件下没有匹配的动态。可在“动态净览”中清空条件，或继续向下滚动加载更多。";
     state.list.insertAdjacentElement("afterend", notice);
     state.emptyNotice = notice;
   }
+  state.emptyNotice.dataset.viewMode = state.viewMode;
+  state.emptyNotice.textContent = hiddenViewEmpty
+    ? "当前已加载范围内没有隐藏动态。再次点击“隐藏”统计卡即可返回普通动态。"
+    : "当前条件下没有匹配的动态。可在“动态净览”中清空条件，或继续向下滚动加载更多。";
 }
 
 function bindList() {
@@ -2116,13 +2353,22 @@ function bindList() {
   state.list = list;
   state.listObserver = new MutationObserver((mutations) => {
     const wrappers = [];
+    let removedCard = false;
     for (const mutation of mutations) {
       const targetElement = mutation.target.nodeType === 1 ? mutation.target : mutation.target.parentElement;
-      if (targetElement?.closest?.(".btf-card-tools")) continue;
+      if (targetElement?.closest?.(".btf-card-tools, [data-btf-owned]")) continue;
       if (mutation.type === "attributes" || mutation.type === "characterData") {
         const closest = targetElement?.closest?.(SELECTORS.wrapper);
         if (closest) wrappers.push(closest);
         continue;
+      }
+      const targetWrapper = targetElement?.closest?.(SELECTORS.wrapper);
+      for (const node of mutation.removedNodes) {
+        if (node.nodeType === 1 && collectCardWrappers(node).length) removedCard = true;
+        // Removed content can change both the card identity and its decision.
+        // In particular, if Bilibili removes one of our direct controls while
+        // patching a card, processing the still-connected wrapper recreates it.
+        if (targetWrapper) wrappers.push(targetWrapper);
       }
       for (const node of mutation.addedNodes) {
         if (node.nodeType === 3) {
@@ -2130,20 +2376,31 @@ function bindList() {
           if (closest) wrappers.push(closest);
           continue;
         }
-        if (node.nodeType !== 1 || node.closest?.(".btf-card-tools")) continue;
+        if (node.nodeType !== 1 || node.closest?.(".btf-card-tools, [data-btf-owned]")) continue;
         const closest = node.closest?.(SELECTORS.wrapper);
         if (closest) wrappers.push(closest);
         wrappers.push(...collectCardWrappers(node));
       }
     }
     if (wrappers.length) queueCards(wrappers);
+    if (removedCard) queueStatsUpdate();
   });
   state.listObserver.observe(list, {
     childList: true,
     subtree: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ["data-mid", "data-did", "data-url", "dyn-id", "href", "class"],
+    attributeFilter: [
+      "data-mid",
+      "data-did",
+      "data-url",
+      "data-module",
+      "data-type",
+      "data-dyn-card-type",
+      "dyn-id",
+      "href",
+      "class",
+    ],
   });
   queueCards(collectCardWrappers(list));
   if (state.loggedIn !== false && state.status.kind === "waiting") setStatus("ready", "动态列表已连接");
@@ -2176,9 +2433,10 @@ function observePage() {
 
 function clearOurCardChanges() {
   document.querySelectorAll(SELECTORS.wrapper).forEach((wrapper) => {
-    delete wrapper.dataset.btfHiddenReason;
+    clearHiddenDecision(wrapper);
     delete wrapper.dataset.btfEnhanced;
     delete wrapper.dataset.btfAuthorKnown;
+    clearCollapsedCard(wrapper);
     wrapper.querySelector(".btf-card-tools")?.remove();
     clearCardToolPlacement(wrapper);
   });
@@ -2190,6 +2448,8 @@ async function activateRoute() {
   if (state.routeActive || state.destroyed) return;
   const generation = ++state.routeGeneration;
   state.routeActive = true;
+  state.viewMode = "normal";
+  delete document.documentElement.dataset.btfViewMode;
   state.routeController?.abort();
   state.routeController = new AbortController();
   resetAccountForDetection();
@@ -2221,7 +2481,7 @@ async function activateRoute() {
 
 function suspendRoute() {
   if (!state.routeActive) return;
-  commitKeywordDraft({ refilter: false });
+  setHiddenOnlyView(false, { announce: false });
   state.routeGeneration += 1;
   state.refilterToken += 1;
   state.routeActive = false;
@@ -2234,9 +2494,11 @@ function suspendRoute() {
   state.list = null;
   abortGroupLoads();
   if (state.scanFrame) cancelAnimationFrame(state.scanFrame);
+  if (state.statsFrame) cancelAnimationFrame(state.statsFrame);
   if (state.bindFrame) cancelAnimationFrame(state.bindFrame);
   if (state.panelFrame) cancelAnimationFrame(state.panelFrame);
   state.scanFrame = 0;
+  state.statsFrame = 0;
   state.bindFrame = 0;
   state.panelFrame = 0;
   state.launcherAnchor = null;
@@ -2244,12 +2506,10 @@ function suspendRoute() {
   state.panelResizeObserver?.disconnect();
   state.panelResizeObserver = null;
   state.pendingCards.clear();
-  window.clearTimeout(state.keywordTimer);
   window.clearTimeout(state.toastTimer);
   window.clearTimeout(state.accountRecheckTimer);
   window.clearTimeout(state.resetTimer);
   window.clearTimeout(state.clearHiddenTimer);
-  state.keywordTimer = 0;
   state.toastTimer = 0;
   state.accountRecheckTimer = 0;
   state.resetTimer = 0;

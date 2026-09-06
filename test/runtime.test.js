@@ -123,18 +123,8 @@ test("userscript mounts, filters, restores, enhances new cards, and survives SPA
 
   launcher.click();
   assert.equal(root.dataset.open, "true");
-  const keywords = shadow.querySelector(".keywords");
-  keywords.value = "OpenAI";
-  keywords.dispatchEvent(new window.Event("input", { bubbles: true }));
-  // A render inside the debounce window must neither erase the draft nor
-  // lowercase the spelling that will later be used in sensitive mode.
-  shadow.querySelector(".enabled-switch").click();
-  assert.equal(keywords.value, "OpenAI");
-  shadow.querySelector(".enabled-switch").click();
-  await waitFor(() => assert.deepEqual(savedSettings(window).keywords, ["OpenAI"]));
-  keywords.value = "";
-  keywords.dispatchEvent(new window.Event("input", { bubbles: true }));
-  await waitFor(() => assert.deepEqual(savedSettings(window).keywords, []));
+  assert.equal(shadow.querySelector(".keywords"), null);
+  assert.ok(shadow.querySelector('[data-section-id="promotion"]'));
   shadow.querySelector("button[data-type='image']").click();
   await waitFor(() => {
     const wrappers = window.document.querySelectorAll(".bili-dyn-list__item");

@@ -24,7 +24,62 @@ export const GLOBAL_STYLE = String.raw`
     pointer-events: none;
   }
 
-  .bili-dyn-list__item[data-btf-hidden-reason] {
+  html:not([data-btf-view-mode="hidden"]) .bili-dyn-list__item[data-btf-hidden-reason] {
+    display: none !important;
+  }
+
+  html[data-btf-view-mode="hidden"] .bili-dyn-list__item:not([data-btf-hidden-reason]) {
+    display: none !important;
+  }
+
+  .bili-dyn-list__item > .btf-hidden-reason {
+    display: none;
+  }
+
+  html[data-btf-view-mode="hidden"] .bili-dyn-list__item[data-btf-hidden-reason] > .btf-hidden-reason {
+    display: block;
+    width: fit-content;
+    max-width: calc(100% - 16px);
+    margin: 0 0 6px 8px;
+    padding: 3px 8px;
+    border: 1px solid var(--line_regular, #e3e5e7);
+    border-radius: 999px;
+    background: var(--bg1, #fff);
+    color: var(--btf-card-muted);
+    font: 600 var(--btf-card-action-font-size)/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bili-dyn-list__item > .btf-card-collapse-toggle {
+    display: none;
+  }
+
+  .bili-dyn-list__item[data-btf-collapsed-reason] > .btf-card-collapse-toggle {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 58px;
+    padding: 12px 16px;
+    border: 1px dashed var(--line_regular, #e3e5e7);
+    border-radius: 10px;
+    background: var(--bg1, #fff);
+    color: var(--btf-card-muted);
+    cursor: pointer;
+    font: 600 var(--btf-empty-font-size)/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    text-align: center;
+  }
+
+  .bili-dyn-list__item[data-btf-collapsed-reason] > .btf-card-collapse-toggle:hover,
+  .bili-dyn-list__item[data-btf-collapsed-reason] > .btf-card-collapse-toggle:focus-visible {
+    border-color: var(--btf-card-accent);
+    color: var(--btf-card-text);
+  }
+
+  .bili-dyn-list__item[data-btf-collapsed-reason]:not([data-btf-collapsed-expanded="true"]) > :not(.btf-card-collapse-toggle) {
     display: none !important;
   }
 
@@ -380,6 +435,19 @@ export const PANEL_STYLE = String.raw`
     text-align: center;
   }
 
+  .stat-button {
+    appearance: none;
+    width: 100%;
+    border: 0;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .stat-button:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--danger); }
+  .stat-button[aria-pressed="true"] { background: var(--danger-soft); box-shadow: inset 0 0 0 1px var(--danger); }
+  .stat-button:disabled { cursor: default; opacity: .68; }
+
   .stat strong { display: block; font-size: 1.333em; line-height: 1.25; font-variant-numeric: tabular-nums; }
   .stat span { color: var(--text-3); font-size: .833em; }
   .stat.hidden strong { color: var(--danger); }
@@ -482,7 +550,6 @@ export const PANEL_STYLE = String.raw`
   .switch[aria-checked="true"]::after { transform: translateX(16px); }
 
   .search,
-  .keywords,
   select {
     width: 100%;
     border: 1px solid var(--line);
@@ -492,8 +559,7 @@ export const PANEL_STYLE = String.raw`
   }
 
   .search { min-height: 34px; padding: 0 10px; font-size: 1em; }
-  .keywords { min-height: 66px; resize: vertical; padding: 8px 10px; font-size: 1em; line-height: 1.5; }
-  .search::placeholder, .keywords::placeholder { color: var(--text-3); }
+  .search::placeholder { color: var(--text-3); }
 
   .group-gesture-help {
     display: flex;
@@ -588,6 +654,11 @@ export const PANEL_STYLE = String.raw`
 
   .inline-check { display: inline-flex; align-items: center; gap: 6px; margin-top: 7px; color: var(--text-2); font-size: .917em; }
   .inline-check input { accent-color: var(--accent); }
+
+  .promotion-options { display: grid; gap: 10px; }
+  .promotion-option + .promotion-option { padding-top: 10px; border-top: 1px solid var(--line); }
+  .suspicious-field { padding-top: 2px; }
+  .promotion-note { margin: -2px 1px 0; color: var(--text-3); font-size: .833em; line-height: 1.5; }
 
   .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .field span { display: block; margin: 0 0 4px 2px; color: var(--text-3); font-size: .833em; }

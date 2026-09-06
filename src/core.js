@@ -1,4 +1,6 @@
-export const SCHEMA_VERSION = 2;
+import { analyzeContentSignals } from "./content-filter.js";
+
+export const SCHEMA_VERSION = 3;
 export const HIDDEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const HIDDEN_MAX_ENTRIES = 2000;
 export const WATCH_LATER_MAX_ENTRIES = 500;
@@ -14,7 +16,7 @@ export const LAUNCHER_CORNERS = Object.freeze([
 export const COLLAPSIBLE_SECTIONS = Object.freeze([
   "groups",
   "types",
-  "keywords",
+  "promotion",
   "layout",
 ]);
 
@@ -39,8 +41,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   density: "comfortable",
   feedWidth: "default",
   hideSidebars: false,
-  keywords: [],
-  caseSensitive: false,
+  promotionEnabled: true,
+  giveawayEnabled: true,
+  suspiciousAction: "collapse",
   hiddenTypes: [],
   groupStatesByUid: {},
   cacheHours: 6,
@@ -52,6 +55,7 @@ const VALID_PANEL_DIRECTIONS = new Set(["auto", "up", "down", "left", "right"]);
 const VALID_THEMES = new Set(["auto", "light", "dark"]);
 const VALID_DENSITIES = new Set(["comfortable", "compact"]);
 const VALID_WIDTHS = new Set(["default", "wide"]);
+const VALID_SUSPICIOUS_ACTIONS = new Set(["collapse", "show"]);
 const VALID_TYPES = new Set(CARD_TYPES);
 
 function isPlainObject(value) {
@@ -97,7 +101,9 @@ export function normalizeLauncherCorner(value, {
 
 export function normalizeCollapsedSections(value) {
   if (!Array.isArray(value)) return [];
-  const selected = new Set(value.filter((section) => VALID_COLLAPSIBLE_SECTIONS.has(section)));
+  const selected = new Set(value
+    .map((section) => section === "keywords" ? "promotion" : section)
+    .filter((section) => VALID_COLLAPSIBLE_SECTIONS.has(section)));
   return COLLAPSIBLE_SECTIONS.filter((section) => selected.has(section));
 }
 
@@ -124,24 +130,6 @@ function normalizeGroupStatesByUid(raw, legacyStates) {
   return output;
 }
 
-export function parseKeywords(input, { caseSensitive = false, maxEntries = 100, maxLength = 100 } = {}) {
-  const source = Array.isArray(input) ? input : String(input ?? "").split(/\r?\n/);
-  const seen = new Set();
-  const output = [];
-  for (const item of source) {
-    const trimmed = String(item ?? "").trim().slice(0, maxLength);
-    if (!trimmed) continue;
-    const comparisonKey = caseSensitive ? trimmed : trimmed.toLocaleLowerCase("zh-CN");
-    if (seen.has(comparisonKey)) continue;
-    seen.add(comparisonKey);
-    // Preserve the user's spelling for display and for a later switch to
-    // case-sensitive mode. Normalization belongs to comparison, not storage.
-    output.push(trimmed);
-    if (output.length >= maxEntries) break;
-  }
-  return output;
-}
-
 export function normalizeSettings(raw) {
   const value = isPlainObject(raw) ? raw : {};
   return {
@@ -161,8 +149,11 @@ export function normalizeSettings(raw) {
     density: VALID_DENSITIES.has(value.density) ? value.density : DEFAULT_SETTINGS.density,
     feedWidth: VALID_WIDTHS.has(value.feedWidth) ? value.feedWidth : DEFAULT_SETTINGS.feedWidth,
     hideSidebars: value.hideSidebars === true,
-    keywords: parseKeywords(value.keywords, { caseSensitive: value.caseSensitive === true }),
-    caseSensitive: value.caseSensitive === true,
+    promotionEnabled: value.promotionEnabled !== false,
+    giveawayEnabled: value.giveawayEnabled !== false,
+    suspiciousAction: VALID_SUSPICIOUS_ACTIONS.has(value.suspiciousAction)
+      ? value.suspiciousAction
+      : DEFAULT_SETTINGS.suspiciousAction,
     hiddenTypes: [...new Set(Array.isArray(value.hiddenTypes) ? value.hiddenTypes.filter((type) => VALID_TYPES.has(type)) : [])],
     groupStatesByUid: normalizeGroupStatesByUid(value.groupStatesByUid, value.groupStates),
     cacheHours: clampNumber(value.cacheHours, 1, 72, DEFAULT_SETTINGS.cacheHours),
@@ -196,26 +187,15 @@ export function evaluateGroup(authorId, authorGroupsMap, groupStates = {}) {
   return included.length === 0 || included.some((id) => memberSet.has(id));
 }
 
-export function keywordMatch(text, keywords, caseSensitive = false) {
-  const normalizedKeywords = parseKeywords(keywords, { caseSensitive });
-  if (!normalizedKeywords.length) return null;
-  const haystack = String(text ?? "").slice(0, 20_000);
-  const normalizedText = caseSensitive ? haystack : haystack.toLocaleLowerCase("zh-CN");
-  return normalizedKeywords.find((keyword) => {
-    const needle = caseSensitive ? keyword : keyword.toLocaleLowerCase("zh-CN");
-    return normalizedText.includes(needle);
-  }) ?? null;
-}
-
 export function evaluateCard(card, settings, context = {}) {
   const normalized = normalizeSettings(settings);
-  if (!normalized.enabled) return { visible: true, reason: null };
+  if (!normalized.enabled) return { visible: true, action: "show", reason: null };
 
   const identity = String(card?.identity ?? card?.dynamicId ?? "");
   const hiddenRecords = context.hiddenRecords ?? {};
   const sessionHidden = context.sessionHidden ?? new Set();
   if ((identity && hiddenRecords[identity]) || (identity && sessionHidden.has?.(identity))) {
-    return { visible: false, reason: "manual" };
+    return { visible: false, action: "hide", reason: "manual" };
   }
 
   const uidKey = String(context.uid ?? "legacy");
@@ -224,17 +204,49 @@ export function evaluateCard(card, settings, context = {}) {
   // numeric account ID; cards without one remain visible (fail-open).
   const authorKey = card?.authorMid ? `m:${card.authorMid}` : null;
   if (!evaluateGroup(authorKey, context.authorGroupsMap, groupStates)) {
-    return { visible: false, reason: "group" };
+    return { visible: false, action: "hide", reason: "group" };
   }
 
   if (card?.typeKnown !== false && normalized.hiddenTypes.includes(card?.type)) {
-    return { visible: false, reason: "type" };
+    return { visible: false, action: "hide", reason: "type" };
   }
 
-  const matchedKeyword = keywordMatch(card?.text, normalized.keywords, normalized.caseSensitive);
-  if (matchedKeyword) return { visible: false, reason: "keyword", detail: matchedKeyword };
+  const contentAnalysis = analyzeContentSignals(card?.contentSignals ?? { text: card?.text });
+  const confidenceRank = { none: 0, medium: 1, high: 2 };
+  const contentDecision = Object.values(contentAnalysis.matches ?? {})
+    .filter((candidate) => candidate?.matched && (
+      candidate.category === "promotion" && normalized.promotionEnabled
+      || candidate.category === "giveaway" && normalized.giveawayEnabled
+    ))
+    .sort((left, right) => (
+      confidenceRank[right.confidence] - confidenceRank[left.confidence]
+      || right.score - left.score
+    ))[0] ?? null;
+  if (contentDecision?.suggestedAction === "hide") {
+    return {
+      visible: false,
+      action: "hide",
+      reason: contentDecision.category,
+      detail: contentDecision.reasons?.join("、") || "高可信内容规则",
+      confidence: contentDecision.confidence,
+      score: contentDecision.score,
+    };
+  }
+  if (
+    contentDecision?.suggestedAction === "collapse"
+    && normalized.suspiciousAction === "collapse"
+  ) {
+    return {
+      visible: true,
+      action: "collapse",
+      reason: contentDecision.category,
+      detail: contentDecision.reasons?.join("、") || "疑似内容规则",
+      confidence: contentDecision.confidence,
+      score: contentDecision.score,
+    };
+  }
 
-  return { visible: true, reason: null };
+  return { visible: true, action: "show", reason: null };
 }
 
 function uniqueStrings(values) {

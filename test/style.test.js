@@ -28,6 +28,22 @@ test("card actions stay in the author title flow without covering body content",
   assert.doesNotMatch(GLOBAL_STYLE, /\.btf-card-tools\s*\{[^}]*position:\s*(?:absolute|fixed)/s);
 });
 
+test("hidden-only view reverses visibility without forcing hidden cards into a new display mode", () => {
+  assert.match(GLOBAL_STYLE, /html:not\(\[data-btf-view-mode="hidden"\]\) \.bili-dyn-list__item\[data-btf-hidden-reason\]\s*\{\s*display:\s*none\s*!important;/s);
+  assert.match(GLOBAL_STYLE, /html\[data-btf-view-mode="hidden"\] \.bili-dyn-list__item:not\(\[data-btf-hidden-reason\]\)\s*\{\s*display:\s*none\s*!important;/s);
+  assert.match(GLOBAL_STYLE, /\.bili-dyn-list__item > \.btf-hidden-reason\s*\{\s*display:\s*none;/s);
+  assert.match(GLOBAL_STYLE, /html\[data-btf-view-mode="hidden"\] \.bili-dyn-list__item\[data-btf-hidden-reason\] > \.btf-hidden-reason\s*\{[^}]*display:\s*block;/s);
+  assert.doesNotMatch(GLOBAL_STYLE, /::before\s*\{[^}]*content:\s*attr\(data-btf-hidden-detail\)/s);
+  assert.doesNotMatch(GLOBAL_STYLE, /html\[data-btf-view-mode="hidden"\] \.bili-dyn-list__item\[data-btf-hidden-reason\]\s*\{[^}]*display:\s*(?:block|flex|grid)/s);
+  assert.match(PANEL_STYLE, /\.stat-button\[aria-pressed="true"\]\s*\{[^}]*background:\s*var\(--danger-soft\);[^}]*box-shadow:/s);
+});
+
+test("suspicious promotion cards collapse behind an accessible in-flow reveal control", () => {
+  assert.match(GLOBAL_STYLE, /\.bili-dyn-list__item\[data-btf-collapsed-reason\] > \.btf-card-collapse-toggle\s*\{[^}]*display:\s*flex;[^}]*width:\s*100%;[^}]*cursor:\s*pointer;/s);
+  assert.match(GLOBAL_STYLE, /\.bili-dyn-list__item\[data-btf-collapsed-reason\]:not\(\[data-btf-collapsed-expanded="true"\]\) > :not\(\.btf-card-collapse-toggle\)\s*\{\s*display:\s*none\s*!important;/s);
+  assert.doesNotMatch(GLOBAL_STYLE, /\.btf-card-collapse-toggle\s*\{[^}]*position:\s*(?:absolute|fixed)/s);
+});
+
 test("gradient launcher SVG keeps a stable high-density icon size", () => {
   assert.match(PANEL_STYLE, /\.launcher-icon\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;[^}]*overflow:\s*visible;[^}]*pointer-events:\s*none;/s);
   assert.match(PANEL_STYLE, /@media\s*\(forced-colors:\s*active\)\s*\{\s*\.launcher-icon path\s*\{\s*fill:\s*ButtonText;/s);

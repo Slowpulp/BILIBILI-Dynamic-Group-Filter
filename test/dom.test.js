@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
+import { analyzeContentSignals } from "../src/content-filter.js";
 
 import {
   SELECTORS,
@@ -8,6 +9,7 @@ import {
   collectCardWrappers,
   extractAuthorMid,
   extractCardModel,
+  extractContentFilterSignals,
   extractDynamicId,
   extractMidFromHref,
   findPrimaryUrl,
@@ -190,5 +192,94 @@ test("generic body links are not promoted to the current card URL", () => {
   assert.equal(extractDynamicId(wrapper), null);
   assert.equal(findPrimaryUrl(wrapper), "");
   assert.equal(extractCardModel(wrapper).linkKnown, false);
+  dom.window.close();
+});
+
+test("extracts conservative product component facts and commerce hosts", () => {
+  const dom = domFor(`<div class="bili-dyn-list__item"><div class="bili-dyn-item">
+    <div class="bili-dyn-item__header"><span class="bili-dyn-title__text">带货UP</span></div>
+    <div class="bili-dyn-content">券后秒杀价 16.9 元</div>
+    <div class="bili-dyn-card-goods">
+      <span>UP主的推荐</span>
+      <a href="https://mall.bilibili.com/detail.html?id=123">去看看</a>
+    </div>
+  </div></div>`);
+  const wrapper = dom.window.document.querySelector(SELECTORS.wrapper);
+  const signals = extractContentFilterSignals(wrapper, dom.window.location.href);
+  const model = extractCardModel(wrapper, dom.window.location.href);
+
+  assert.equal(signals.structured.productComponent, true);
+  assert.equal(signals.structured.productRecommendationLabel, true);
+  assert.equal(signals.structured.purchaseButton, true);
+  assert.equal(signals.structured.commerceLink, true);
+  assert.deepEqual(signals.structured.commerceHosts, ["mall.bilibili.com"]);
+  assert.deepEqual(model.contentSignals, signals);
+  dom.window.close();
+});
+
+test("recognizes a generic common-card shell only when it is clearly a product component", () => {
+  const dom = domFor(`<div class="bili-dyn-list__item"><div class="bili-dyn-item">
+    <div class="bili-dyn-item__header"><span class="bili-dyn-title__text">带货UP</span></div>
+    <div class="bili-dyn-card-common">
+      <span class="goods-label">UP主的推荐</span>
+      <button>去看看</button>
+    </div>
+  </div></div>`);
+  const signals = extractContentFilterSignals(dom.window.document.querySelector(SELECTORS.wrapper));
+
+  assert.equal(signals.structured.productComponent, true);
+  assert.equal(signals.structured.productRecommendationLabel, true);
+  assert.equal(signals.structured.purchaseButton, true);
+  dom.window.close();
+});
+
+test("body prose and a generic button cannot manufacture product structure", () => {
+  const dom = domFor(`<div class="bili-dyn-list__item"><div class="bili-dyn-item">
+    <div class="bili-dyn-item__header"><span class="bili-dyn-title__text">技术UP</span></div>
+    <div class="bili-dyn-content">分析电商平台的商品推荐算法</div>
+    <a href="https://example.com/article">去看看</a>
+  </div></div>`);
+  const signals = extractContentFilterSignals(dom.window.document.querySelector(SELECTORS.wrapper));
+
+  assert.equal(signals.structured.productComponent, false);
+  assert.equal(signals.structured.productRecommendationLabel, false);
+  assert.equal(signals.structured.purchaseButton, false);
+  assert.equal(signals.structured.commerceLink, false);
+  assert.equal(analyzeContentSignals(signals).matches.promotion.confidence, "none");
+  dom.window.close();
+});
+
+test("extracts giveaway signals while excluding script-owned controls", () => {
+  const dom = domFor(`<div class="bili-dyn-list__item"><div class="bili-dyn-item">
+    <div class="bili-dyn-item__header">
+      <span class="bili-dyn-title__text">抽奖UP</span>
+      <div class="btf-card-tools">隐藏 本地稍后看 优惠券 9.9 元</div>
+    </div>
+    <div class="bili-dyn-content">互动抽奖，关注+转发即可参与，周日开奖。</div>
+  </div></div>`);
+  const wrapper = dom.window.document.querySelector(SELECTORS.wrapper);
+  const signals = extractContentFilterSignals(wrapper);
+
+  assert.equal(signals.giveaway.strongCall, true);
+  assert.equal(signals.giveaway.participationCondition, true);
+  assert.equal(signals.giveaway.drawInfo, true);
+  assert.deepEqual(signals.giveaway.actions, ["关注", "转发"]);
+  assert.equal(signals.promotion.couponOrDiscount, false);
+  assert.equal(signals.promotion.price, false);
+  assert.doesNotMatch(signals.text, /本地稍后看|9\.9/);
+  dom.window.close();
+});
+
+test("generic common cards do not masquerade as explicit product components", () => {
+  const dom = domFor(`<div class="bili-dyn-list__item"><div class="bili-dyn-item">
+    <div class="bili-dyn-item__header"><span class="bili-dyn-title__text">普通UP</span></div>
+    <div class="bili-dyn-card-common">普通链接预览卡</div>
+    <a href="https://example.com/product">查看外部文章</a>
+  </div></div>`);
+  const signals = extractContentFilterSignals(dom.window.document.querySelector(SELECTORS.wrapper));
+
+  assert.equal(signals.structured.productComponent, false);
+  assert.equal(signals.structured.commerceLink, false);
+  assert.deepEqual(signals.structured.commerceHosts, []);
   dom.window.close();
 });

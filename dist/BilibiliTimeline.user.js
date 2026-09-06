@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         B站动态净览 - 分组筛选与阅读助手
 // @namespace    bilibili-timeline-focus.local
-// @version      2.1.1
-// @description  按关注分组筛选B站动态，并提供包含/排除、关键词、类型过滤、本地隐藏、四角入口、模块折叠与字号缩放。
+// @version      3.0.0
+// @description  按关注分组筛选B站动态，并提供推广抽奖识别、类型过滤、隐藏内容查看、本地稍后看与布局优化。
 // @author       Local userscript project
 // @license      MIT
 // @match        https://t.bilibili.com/*
@@ -14,8 +14,272 @@
 // ==/UserScript==
 
 (() => {
+  // src/content-filter.js
+  var CONTENT_SIGNAL_VERSION = 1;
+  var CONTENT_FILTER_CATEGORIES = Object.freeze([
+    "promotion",
+    "giveaway"
+  ]);
+  var PLATFORM_PATTERNS = Object.freeze([
+    ["美团", /美团/iu],
+    ["淘宝/天猫", /淘宝|桃宝|某宝|天猫|淘特/iu],
+    ["京东", /京东|京喜/iu],
+    ["拼多多", /拼多多|多多买菜/iu],
+    ["抖音商城", /抖音(?:商城|小店)/iu],
+    ["快手小店", /快手(?:小店|商城)/iu],
+    ["饿了么", /饿了么/iu],
+    ["唯品会", /唯品会/iu],
+    ["苏宁", /苏宁(?:易购)?/iu],
+    ["得物", /得物(?:app)?/iu]
+  ]);
+  var APP_SEARCH_PATTERN = /(?:(?:app|客户端|平台)\s*(?:内|里)?\s*(?:搜|搜索|查找)|(?:快去|打开|上)\s*(?:美团|淘宝|桃宝|某宝|天猫|京东|拼多多|抖音|快手|饿了么|唯品会|苏宁|得物)\s*(?:app|客户端)?\s*(?:搜|搜索|查找)|(?:美团|淘宝|桃宝|某宝|天猫|京东|拼多多|抖音|快手|饿了么|唯品会|苏宁|得物)\s*(?:app|客户端)?\s*(?:搜|搜索|查找))/iu;
+  var PROMOTION_CODE_PATTERN = /(?:口令|暗号|密令|券码|助力码|邀请码|复制|(?:搜|搜索|查找)(?:索)?)[^,，。!！?？;；\n]{0,12}(?:[a-z\d]{5,24}|￥[^￥\s]{3,30}￥)|(?:\d{0,2}\s*)?copy\s*这条(?:信息|消息)[^,，。!！?？;；\n]{0,24}[a-z\d]{7,30}/iu;
+  var COUPON_PATTERN = /优惠券|代金券|满减|折扣券|补贴|无门槛|红包|返现|立减|券后|领券|\d+(?:\.\d+)?\s*元?券/iu;
+  var PRICE_PATTERN = /(?:￥|¥)\s*\d+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?\s*(?:元|块)(?:\s*(?:起|到手))?|(?:到手|仅需|低至|秒杀价|活动价|券后价)[^,，。!！?？;；\n]{0,10}\d+(?:\.\d{1,2})?/iu;
+  var URGENCY_PATTERN = /大漏|薅羊毛|秒杀|快冲|手慢无|限时|疯抢|抢到就是赚|赶紧冲|疯狂放水|神价|白菜价/iu;
+  var COMMERCIAL_CTA_PATTERN = /立即购买|去看看|去购买|去抢购|立即抢购|下单|包邮|同款|购买链接|商品链接|快去[^,，。!！?？;；\n]{0,12}(?:搜|买|领)/iu;
+  var GIVEAWAY_MENTION_PATTERN = /抽奖|开奖|中奖|获奖/iu;
+  var STRONG_GIVEAWAY_PATTERN = /(?:互动抽奖|福利抽奖|抽奖活动|转发抽奖)(?!\s*(?:机制|教程|分析|设计|是否|新闻|报道))|(?:给|为)[^,，。!！?？;；\n]{0,8}(?:大家|粉丝)[^,，。!！?？;；\n]{0,5}抽(?:一个|一位|一名|取|送)|抽(?:一|二|三|四|五|六|七|八|九|十|\d+|几|若干)(?:个|位|名|份)|(?:^|[^\p{L}\p{N}])(?:(?:本次|本期|今日|今天)\s*)?抽奖\s*[:：]/iu;
+  var PARTICIPATION_CUE_PATTERN = /即可参与|可参与|参与(?:本次)?抽奖|参加(?:本次)?抽奖|抽奖条件|参与条件|参与(?:方式|规则|要求)/iu;
+  var DRAW_INFO_PATTERN = /(?:周[一二三四五六日天]|星期[一二三四五六日天]|今天|今日|今晚|明天|明日|\d+\s*天后|\d{1,2}\s*[月/-]\s*\d{1,2}\s*(?:日|号)?)[^,，。!！?？;；\n]{0,10}开奖|开奖(?:时间|日期)|(?:届时|准时|随机|统一)\s*开奖|截止[^,，。!！?？;；\n]{0,16}(?:参与|抽奖)|获奖名单|抽奖结果/iu;
+  var PRIZE_PATTERN = /奖品|赠送|送出|(?:抽(?:取|出)?|送(?:出)?)[^,，。!！?？;；\n]{0,8}(?:一|二|三|四|五|六|七|八|九|十|\d+|几|若干)(?:份|个|位|名|台|套)|(?:现金|红包|兑换码|激活码|周边|会员|游戏)[^,，。!！?？;；\n]{0,8}(?:奖品|赠送|送出)/iu;
+  var DISCUSSION_CONTEXT_PATTERN = /讨论|分析|机制|教程|如何|是否|为什么|科普|防骗|诈骗|骗局|新闻|报道/iu;
+  var COMMERCIAL_DISCUSSION_PATTERN = /讨论|分析|机制|设计|体验|评测|测评|数据库|发展史|科普|反诈|新闻|报道/iu;
+  var EDUCATIONAL_COMMERCIAL_CONTEXT_PATTERN = /教程|讨论|分析|机制|设计|体验|评测|测评|科普|研究|说明/iu;
+  var EXPLANATORY_EXAMPLE_PATTERN = /示例|举例|例子|仅作(?:演示|说明|测试)|用于(?:演示|说明|测试)|测试(?:商品|数据|字段|页面|用例)|(?:字段|文案|页面|功能)(?:只是|仅是|作为)?(?:示例|测试)|如何(?:设计|实现)|设计思路/iu;
+  var SAFETY_WARNING_PATTERN = /反诈|谨防|警惕|避坑|曝光|揭露|(?:骗局|诈骗|骗术|虚假)(?:提醒|警示|曝光|揭露|分析)|(?:请勿|不要|别)(?:参与|购买|下单|复制|搜索|相信)/iu;
+  var EXPLICIT_CODE_CUE_PATTERN = /口令|暗号|密令|券码|助力码|邀请码|(?:\d{0,2}\s*)?copy\s*这条(?:信息|消息)/iu;
+  var ACTIONABLE_PURCHASE_PATTERN = /立即购买|去购买|去抢购|立即抢购|立即下单|下单购买|购买链接|商品链接|点击[^,，。!！?？;；\n]{0,10}(?:购买|下单|领券)|快去[^,，。!！?？;；\n]{0,12}(?:买|领券)|领券[^,，。!！?？;；\n]{0,8}(?:下单|购买)/iu;
+  var GIVEAWAY_SAFETY_PATTERN = /抽奖(?:套路|骗局|骗术|话术)|套路(?:揭秘|曝光|分析)|揭秘[^,，。!！?？;；\n]{0,12}(?:抽奖|话术)|警惕[^,，。!！?？;；\n]{0,12}(?:抽奖|开奖|中奖|话术)|(?:反诈|防骗|避坑|曝光|揭露)[^,，。!！?？;；\n]{0,12}(?:抽奖|开奖|中奖|套路|话术)|(?:这种|此类)(?:抽奖|开奖|中奖)?话术[^,，。!！?？;；\n]{0,8}(?:要)?警惕/iu;
+  var GIVEAWAY_ACTION_PATTERNS = Object.freeze([
+    ["关注", /关注/iu],
+    ["转发", /转发/iu],
+    ["评论", /评论/iu],
+    ["点赞", /点赞/iu],
+    ["三连", /三连/iu],
+    ["@好友", /@\s*(?:好友|一位|两位|三位|\d+位)/iu]
+  ]);
+  function normalizeText(value) {
+    return String(value ?? "").normalize("NFKC").replace(/[\u200b-\u200d\ufeff]/g, "").replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n+ */g, "\n").trim().slice(0, 2e4);
+  }
+  function uniqueStrings(value) {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean))];
+  }
+  function detectedPlatforms(text) {
+    return PLATFORM_PATTERNS.filter(([, pattern]) => pattern.test(text)).map(([label]) => label);
+  }
+  function detectedGiveawayActions(text) {
+    return GIVEAWAY_ACTION_PATTERNS.filter(([, pattern]) => pattern.test(text)).map(([label]) => label);
+  }
+  function splitClauses(text) {
+    return text.split(/[,，。.!！?？;；\n]+/u).map((segment) => segment.trim()).filter(Boolean);
+  }
+  function hasParticipationCondition(text, actions, hasStrongGiveawayCall) {
+    if (!actions.length) return false;
+    let previousSegmentWasCall = false;
+    return splitClauses(text).some((segment) => {
+      if (DISCUSSION_CONTEXT_PATTERN.test(segment)) {
+        previousSegmentWasCall = false;
+        return false;
+      }
+      const actionCount = GIVEAWAY_ACTION_PATTERNS.filter(([, pattern]) => pattern.test(segment)).length;
+      const segmentIsCall = STRONG_GIVEAWAY_PATTERN.test(segment);
+      const explicitCondition = actionCount > 0 && PARTICIPATION_CUE_PATTERN.test(segment);
+      const implicitCondition = hasStrongGiveawayCall && actionCount >= 2 && (segmentIsCall || previousSegmentWasCall);
+      previousSegmentWasCall = segmentIsCall;
+      return explicitCondition || implicitCondition;
+    });
+  }
+  function createContentSignals(input = {}) {
+    const text = normalizeText(input.text);
+    const platforms = detectedPlatforms(text);
+    const giveawayActions = detectedGiveawayActions(text);
+    const hasGiveawayMention = GIVEAWAY_MENTION_PATTERN.test(text);
+    const hasStrongGiveawayCall = STRONG_GIVEAWAY_PATTERN.test(text);
+    return {
+      signalVersion: CONTENT_SIGNAL_VERSION,
+      text,
+      structured: {
+        productComponent: input.hasProductComponent === true,
+        // Recommendation labels are structural evidence only when the DOM
+        // extractor found them inside a credible product component. Plain body
+        // prose such as “商品推荐算法” must never manufacture this signal.
+        productRecommendationLabel: input.hasProductRecommendationLabel === true,
+        purchaseButton: input.hasPurchaseButton === true,
+        commerceLink: input.hasCommerceLink === true,
+        giveawayModule: input.hasGiveawayModule === true,
+        commerceHosts: uniqueStrings(input.commerceHosts)
+      },
+      promotion: {
+        platforms,
+        appSearch: APP_SEARCH_PATTERN.test(text),
+        promotionCode: PROMOTION_CODE_PATTERN.test(text),
+        couponOrDiscount: COUPON_PATTERN.test(text),
+        price: PRICE_PATTERN.test(text),
+        urgency: URGENCY_PATTERN.test(text),
+        commercialCallToAction: COMMERCIAL_CTA_PATTERN.test(text)
+      },
+      giveaway: {
+        mention: hasGiveawayMention,
+        strongCall: hasStrongGiveawayCall,
+        participationCondition: hasParticipationCondition(text, giveawayActions, hasStrongGiveawayCall),
+        actions: giveawayActions,
+        drawInfo: DRAW_INFO_PATTERN.test(text),
+        prize: PRIZE_PATTERN.test(text)
+      }
+    };
+  }
+  function isContentSignals(value) {
+    return Boolean(value) && value.signalVersion === CONTENT_SIGNAL_VERSION && value.structured && value.promotion && value.giveaway;
+  }
+  function resultFor(category, confidence, score, reasons, reasonCodes) {
+    const matched = confidence === "high" || confidence === "medium";
+    return {
+      category,
+      matched,
+      confidence,
+      suggestedAction: confidence === "high" ? "hide" : confidence === "medium" ? "collapse" : "show",
+      score,
+      detail: reasons.join("；"),
+      reasons,
+      reasonCodes
+    };
+  }
+  function analyzePromotion(signals) {
+    const { structured, promotion } = signals;
+    const reasons = [];
+    const reasonCodes = [];
+    let score = 0;
+    const addReason = (condition, points, code, label) => {
+      if (!condition) return;
+      score += points;
+      reasonCodes.push(code);
+      reasons.push(label);
+    };
+    addReason(structured.productComponent, 100, "product-component", "检测到明确的商品组件");
+    addReason(structured.productRecommendationLabel, 45, "product-recommendation", "出现“UP主推荐/商品推荐”标识");
+    addReason(structured.purchaseButton, 25, "purchase-button", "包含购买或查看商品按钮");
+    addReason(structured.commerceLink, 35, "commerce-link", "包含已知购物平台链接");
+    addReason(promotion.platforms.length > 0, 20, "commerce-platform", `提到购物平台：${promotion.platforms.join("、")}`);
+    addReason(promotion.appSearch, 30, "app-search", "包含 App 搜索引导");
+    addReason(promotion.promotionCode, 25, "promotion-code", "包含搜索口令或优惠码");
+    addReason(promotion.couponOrDiscount, 20, "coupon-or-discount", "包含优惠券、满减或补贴信息");
+    addReason(promotion.price, 15, "price", "包含明确价格信息");
+    addReason(promotion.urgency, 8, "promotion-urgency", "包含促销催促话术");
+    addReason(promotion.commercialCallToAction, 12, "commercial-cta", "包含购买或领取引导");
+    const hasStructuredCommerce = structured.productComponent || structured.purchaseButton || structured.commerceLink;
+    const safetyWarning = SAFETY_WARNING_PATTERN.test(signals.text) && !hasStructuredCommerce;
+    if (safetyWarning) {
+      return resultFor("promotion", "none", score, reasons, reasonCodes);
+    }
+    const clearlyExplanatory = EDUCATIONAL_COMMERCIAL_CONTEXT_PATTERN.test(signals.text) && EXPLANATORY_EXAMPLE_PATTERN.test(signals.text) && !hasStructuredCommerce && !EXPLICIT_CODE_CUE_PATTERN.test(signals.text) && !ACTIONABLE_PURCHASE_PATTERN.test(signals.text);
+    if (clearlyExplanatory) {
+      return resultFor("promotion", "none", score, reasons, reasonCodes);
+    }
+    const looksLikeDiscussion = COMMERCIAL_DISCUSSION_PATTERN.test(signals.text) && !hasStructuredCommerce && !EXPLICIT_CODE_CUE_PATTERN.test(signals.text) && !promotion.urgency && !promotion.commercialCallToAction;
+    if (looksLikeDiscussion) {
+      return resultFor("promotion", "none", score, reasons, reasonCodes);
+    }
+    const explicitProduct = structured.productComponent || structured.productRecommendationLabel && (structured.purchaseButton || structured.commerceLink);
+    const platformSearchSupport = [
+      promotion.promotionCode,
+      promotion.couponOrDiscount,
+      promotion.price,
+      promotion.urgency,
+      promotion.commercialCallToAction
+    ].filter(Boolean).length;
+    const platformSearchCombination = promotion.platforms.length > 0 && promotion.appSearch && platformSearchSupport >= 2;
+    const codeOfferCombination = promotion.appSearch && promotion.promotionCode && (promotion.couponOrDiscount || promotion.price);
+    const denseOfferCombination = promotion.platforms.length > 0 && promotion.promotionCode && promotion.couponOrDiscount && promotion.price;
+    if (explicitProduct || platformSearchCombination || codeOfferCombination || denseOfferCombination) {
+      return resultFor("promotion", "high", score, reasons, reasonCodes);
+    }
+    const semanticSignals = [
+      promotion.platforms.length > 0,
+      promotion.appSearch,
+      promotion.promotionCode,
+      promotion.couponOrDiscount,
+      promotion.price,
+      promotion.urgency,
+      promotion.commercialCallToAction,
+      structured.productRecommendationLabel,
+      structured.purchaseButton,
+      structured.commerceLink
+    ].filter(Boolean).length;
+    const hasStrongCommercialCue = promotion.appSearch || promotion.promotionCode || structured.productRecommendationLabel || structured.purchaseButton || structured.commerceLink || promotion.couponOrDiscount && promotion.price && promotion.urgency;
+    const confidence = semanticSignals >= 3 && hasStrongCommercialCue ? "medium" : "none";
+    return resultFor("promotion", confidence, score, reasons, reasonCodes);
+  }
+  function analyzeGiveaway(signals) {
+    const { structured, giveaway } = signals;
+    const reasons = [];
+    const reasonCodes = [];
+    let score = 0;
+    const addReason = (condition, points, code, label) => {
+      if (!condition) return;
+      score += points;
+      reasonCodes.push(code);
+      reasons.push(label);
+    };
+    addReason(structured.giveawayModule, 45, "giveaway-module", "检测到互动抽奖组件");
+    addReason(giveaway.strongCall, 35, "giveaway-call", "包含明确的抽奖发起话术");
+    addReason(!giveaway.strongCall && giveaway.mention, 12, "giveaway-mention", "提到抽奖或开奖");
+    addReason(giveaway.participationCondition, 30, "participation-condition", `包含参与条件${giveaway.actions.length ? `：${giveaway.actions.join("、")}` : ""}`);
+    addReason(giveaway.drawInfo, 25, "draw-announcement", "包含开奖时间、截止信息或获奖公告");
+    addReason(giveaway.prize, 10, "giveaway-prize", "包含奖品或赠送信息");
+    const safetyOrDebunkingContext = GIVEAWAY_SAFETY_PATTERN.test(signals.text) && !structured.giveawayModule;
+    if (safetyOrDebunkingContext) {
+      return resultFor("giveaway", "none", score, reasons, reasonCodes);
+    }
+    const looksLikeDiscussion = DISCUSSION_CONTEXT_PATTERN.test(signals.text) && !structured.giveawayModule && !giveaway.participationCondition;
+    if (looksLikeDiscussion) {
+      return resultFor("giveaway", "none", score, reasons, reasonCodes);
+    }
+    const clearCall = structured.giveawayModule || giveaway.strongCall || giveaway.mention;
+    if (clearCall && giveaway.participationCondition && giveaway.drawInfo) {
+      return resultFor("giveaway", "high", score, reasons, reasonCodes);
+    }
+    const supportingSignals = [
+      giveaway.participationCondition,
+      giveaway.drawInfo,
+      giveaway.prize
+    ].filter(Boolean).length;
+    const medium = (structured.giveawayModule || giveaway.strongCall) && supportingSignals >= 1;
+    return resultFor("giveaway", medium ? "medium" : "none", score, reasons, reasonCodes);
+  }
+  function analyzeContentSignals(input = {}) {
+    const candidate = input?.contentSignals ?? input;
+    const signals = isContentSignals(candidate) ? candidate : createContentSignals(candidate);
+    const promotion = analyzePromotion(signals);
+    const giveaway = analyzeGiveaway(signals);
+    const matches = { promotion, giveaway };
+    const matchedResults = [promotion, giveaway].filter((item) => item.matched);
+    const confidenceRank = { none: 0, medium: 1, high: 2 };
+    matchedResults.sort((left, right) => {
+      const confidenceDelta = confidenceRank[right.confidence] - confidenceRank[left.confidence];
+      if (confidenceDelta) return confidenceDelta;
+      if (right.score !== left.score) return right.score - left.score;
+      return left.category === "giveaway" ? -1 : 1;
+    });
+    const primary = matchedResults[0] ?? null;
+    return {
+      matched: Boolean(primary),
+      category: primary?.category ?? null,
+      categories: matchedResults.map((item) => item.category),
+      confidence: primary?.confidence ?? "none",
+      suggestedAction: primary?.suggestedAction ?? "show",
+      score: primary?.score ?? 0,
+      detail: primary?.detail ?? "",
+      reasons: primary?.reasons ?? [],
+      reasonCodes: primary?.reasonCodes ?? [],
+      matches,
+      signals
+    };
+  }
+
   // src/core.js
-  var SCHEMA_VERSION = 2;
+  var SCHEMA_VERSION = 3;
   var HIDDEN_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
   var HIDDEN_MAX_ENTRIES = 2e3;
   var WATCH_LATER_MAX_ENTRIES = 500;
@@ -31,7 +295,7 @@
   var COLLAPSIBLE_SECTIONS = Object.freeze([
     "groups",
     "types",
-    "keywords",
+    "promotion",
     "layout"
   ]);
   var CARD_TYPES = Object.freeze([
@@ -54,8 +318,9 @@
     density: "comfortable",
     feedWidth: "default",
     hideSidebars: false,
-    keywords: [],
-    caseSensitive: false,
+    promotionEnabled: true,
+    giveawayEnabled: true,
+    suspiciousAction: "collapse",
     hiddenTypes: [],
     groupStatesByUid: {},
     cacheHours: 6
@@ -66,6 +331,7 @@
   var VALID_THEMES = /* @__PURE__ */ new Set(["auto", "light", "dark"]);
   var VALID_DENSITIES = /* @__PURE__ */ new Set(["comfortable", "compact"]);
   var VALID_WIDTHS = /* @__PURE__ */ new Set(["default", "wide"]);
+  var VALID_SUSPICIOUS_ACTIONS = /* @__PURE__ */ new Set(["collapse", "show"]);
   var VALID_TYPES = new Set(CARD_TYPES);
   function isPlainObject(value) {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -105,7 +371,7 @@
   }
   function normalizeCollapsedSections(value) {
     if (!Array.isArray(value)) return [];
-    const selected = new Set(value.filter((section) => VALID_COLLAPSIBLE_SECTIONS.has(section)));
+    const selected = new Set(value.map((section) => section === "keywords" ? "promotion" : section).filter((section) => VALID_COLLAPSIBLE_SECTIONS.has(section)));
     return COLLAPSIBLE_SECTIONS.filter((section) => selected.has(section));
   }
   function normalizeGroupStates(raw) {
@@ -129,21 +395,6 @@
     if (Object.keys(legacy).length && !output.legacy) output.legacy = legacy;
     return output;
   }
-  function parseKeywords(input, { caseSensitive = false, maxEntries = 100, maxLength = 100 } = {}) {
-    const source = Array.isArray(input) ? input : String(input ?? "").split(/\r?\n/);
-    const seen = /* @__PURE__ */ new Set();
-    const output = [];
-    for (const item of source) {
-      const trimmed = String(item ?? "").trim().slice(0, maxLength);
-      if (!trimmed) continue;
-      const comparisonKey = caseSensitive ? trimmed : trimmed.toLocaleLowerCase("zh-CN");
-      if (seen.has(comparisonKey)) continue;
-      seen.add(comparisonKey);
-      output.push(trimmed);
-      if (output.length >= maxEntries) break;
-    }
-    return output;
-  }
   function normalizeSettings(raw) {
     const value = isPlainObject(raw) ? raw : {};
     return {
@@ -161,8 +412,9 @@
       density: VALID_DENSITIES.has(value.density) ? value.density : DEFAULT_SETTINGS.density,
       feedWidth: VALID_WIDTHS.has(value.feedWidth) ? value.feedWidth : DEFAULT_SETTINGS.feedWidth,
       hideSidebars: value.hideSidebars === true,
-      keywords: parseKeywords(value.keywords, { caseSensitive: value.caseSensitive === true }),
-      caseSensitive: value.caseSensitive === true,
+      promotionEnabled: value.promotionEnabled !== false,
+      giveawayEnabled: value.giveawayEnabled !== false,
+      suspiciousAction: VALID_SUSPICIOUS_ACTIONS.has(value.suspiciousAction) ? value.suspiciousAction : DEFAULT_SETTINGS.suspiciousAction,
       hiddenTypes: [...new Set(Array.isArray(value.hiddenTypes) ? value.hiddenTypes.filter((type) => VALID_TYPES.has(type)) : [])],
       groupStatesByUid: normalizeGroupStatesByUid(value.groupStatesByUid, value.groupStates),
       cacheHours: clampNumber(value.cacheHours, 1, 72, DEFAULT_SETTINGS.cacheHours)
@@ -191,39 +443,50 @@
     const included = active.filter(([, state2]) => Number(state2) === 1).map(([id]) => String(id));
     return included.length === 0 || included.some((id) => memberSet.has(id));
   }
-  function keywordMatch(text, keywords, caseSensitive = false) {
-    const normalizedKeywords = parseKeywords(keywords, { caseSensitive });
-    if (!normalizedKeywords.length) return null;
-    const haystack = String(text ?? "").slice(0, 2e4);
-    const normalizedText = caseSensitive ? haystack : haystack.toLocaleLowerCase("zh-CN");
-    return normalizedKeywords.find((keyword) => {
-      const needle = caseSensitive ? keyword : keyword.toLocaleLowerCase("zh-CN");
-      return normalizedText.includes(needle);
-    }) ?? null;
-  }
   function evaluateCard(card, settings, context = {}) {
     const normalized = normalizeSettings(settings);
-    if (!normalized.enabled) return { visible: true, reason: null };
+    if (!normalized.enabled) return { visible: true, action: "show", reason: null };
     const identity = String(card?.identity ?? card?.dynamicId ?? "");
     const hiddenRecords = context.hiddenRecords ?? {};
     const sessionHidden = context.sessionHidden ?? /* @__PURE__ */ new Set();
     if (identity && hiddenRecords[identity] || identity && sessionHidden.has?.(identity)) {
-      return { visible: false, reason: "manual" };
+      return { visible: false, action: "hide", reason: "manual" };
     }
     const uidKey = String(context.uid ?? "legacy");
     const groupStates = context.groupStates ?? normalized.groupStatesByUid[uidKey] ?? normalized.groupStatesByUid.legacy ?? {};
     const authorKey = card?.authorMid ? `m:${card.authorMid}` : null;
     if (!evaluateGroup(authorKey, context.authorGroupsMap, groupStates)) {
-      return { visible: false, reason: "group" };
+      return { visible: false, action: "hide", reason: "group" };
     }
     if (card?.typeKnown !== false && normalized.hiddenTypes.includes(card?.type)) {
-      return { visible: false, reason: "type" };
+      return { visible: false, action: "hide", reason: "type" };
     }
-    const matchedKeyword = keywordMatch(card?.text, normalized.keywords, normalized.caseSensitive);
-    if (matchedKeyword) return { visible: false, reason: "keyword", detail: matchedKeyword };
-    return { visible: true, reason: null };
+    const contentAnalysis = analyzeContentSignals(card?.contentSignals ?? { text: card?.text });
+    const confidenceRank = { none: 0, medium: 1, high: 2 };
+    const contentDecision = Object.values(contentAnalysis.matches ?? {}).filter((candidate) => candidate?.matched && (candidate.category === "promotion" && normalized.promotionEnabled || candidate.category === "giveaway" && normalized.giveawayEnabled)).sort((left, right) => confidenceRank[right.confidence] - confidenceRank[left.confidence] || right.score - left.score)[0] ?? null;
+    if (contentDecision?.suggestedAction === "hide") {
+      return {
+        visible: false,
+        action: "hide",
+        reason: contentDecision.category,
+        detail: contentDecision.reasons?.join("、") || "高可信内容规则",
+        confidence: contentDecision.confidence,
+        score: contentDecision.score
+      };
+    }
+    if (contentDecision?.suggestedAction === "collapse" && normalized.suspiciousAction === "collapse") {
+      return {
+        visible: true,
+        action: "collapse",
+        reason: contentDecision.category,
+        detail: contentDecision.reasons?.join("、") || "疑似内容规则",
+        confidence: contentDecision.confidence,
+        score: contentDecision.score
+      };
+    }
+    return { visible: true, action: "show", reason: null };
   }
-  function uniqueStrings(values) {
+  function uniqueStrings2(values) {
     return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value)).filter(Boolean))];
   }
   function normalizeGroupCache(raw) {
@@ -237,8 +500,8 @@
         name: String(rawGroup.name ?? rawGroup.id).trim().slice(0, 80),
         count: Math.max(0, Number(rawGroup.count) || 0),
         loadedAt: Math.max(0, Number(rawGroup.loadedAt) || 0),
-        memberMids: uniqueStrings(rawGroup.memberMids),
-        memberNames: uniqueStrings(rawGroup.memberNames)
+        memberMids: uniqueStrings2(rawGroup.memberMids),
+        memberNames: uniqueStrings2(rawGroup.memberNames)
       };
       groups.push(group);
       for (const mid of group.memberMids) {
@@ -406,6 +669,72 @@
     }
     return "";
   }
+  function cardTextWithoutOwnUi(card) {
+    const textSource = card.cloneNode(true);
+    textSource.querySelectorAll(".btf-card-tools, .btf-card-collapse-toggle, [data-btf-owned]").forEach((element) => element.remove());
+    return String(textSource.innerText ?? textSource.textContent ?? "").replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n+ */g, "\n").trim().slice(0, 2e4);
+  }
+  function elementHasText(root, selector, pattern) {
+    for (const element of root.querySelectorAll(selector)) {
+      const text = String(element.innerText ?? element.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (pattern.test(text)) return true;
+    }
+    return false;
+  }
+  var PRODUCT_COMPONENT_SELECTOR = [
+    ".bili-dyn-card-goods",
+    ".bili-dyn-card-goods__item",
+    ".dyn-card-goods",
+    "[class*='goods-card']",
+    "[class*='goods_card']",
+    "[class*='product-card']",
+    "[data-module='goods']",
+    "[data-type='goods']",
+    "[data-dyn-card-type='goods']"
+  ].join(", ");
+  var PRODUCT_RECOMMENDATION_PATTERN = /up\s*主(?:的)?推荐|商品推荐/iu;
+  var EXACT_PRODUCT_RECOMMENDATION_PATTERN = /^(?:up\s*主(?:的)?推荐|商品推荐)$/iu;
+  var PURCHASE_BUTTON_PATTERN = /^(?:去看看|立即购买|去购买|购买|抢购|立即抢购|领取|领券)$/iu;
+  function elementText(element) {
+    return String(element?.innerText ?? element?.textContent ?? "").replace(/\s+/g, " ").trim();
+  }
+  function hasExactProductLabel(root) {
+    return elementHasText(root, "*", EXACT_PRODUCT_RECOMMENDATION_PATTERN);
+  }
+  function hasPurchaseControl(root) {
+    return elementHasText(root, "a, button, [role='button']", PURCHASE_BUTTON_PATTERN);
+  }
+  function productComponentRoots(card) {
+    const explicitRoots = [];
+    if (card.matches?.(PRODUCT_COMPONENT_SELECTOR)) explicitRoots.push(card);
+    card.querySelectorAll(PRODUCT_COMPONENT_SELECTOR).forEach((element) => explicitRoots.push(element));
+    const genericRoots = [...card.querySelectorAll(".bili-dyn-card-common")].filter((element) => hasExactProductLabel(element) && hasPurchaseControl(element));
+    return [.../* @__PURE__ */ new Set([...explicitRoots, ...genericRoots])];
+  }
+  var COMMERCE_HOSTS = Object.freeze([
+    "mall.bilibili.com",
+    "cm.bilibili.com",
+    "taobao.com",
+    "tmall.com",
+    "jd.com",
+    "meituan.com",
+    "pinduoduo.com",
+    "yangkeduo.com",
+    "ele.me",
+    "vip.com"
+  ]);
+  function findCommerceHosts(card, baseUrl) {
+    const hosts = [];
+    for (const link of card.querySelectorAll("a[href]")) {
+      try {
+        const hostname = new URL(link.getAttribute("href"), baseUrl).hostname.toLocaleLowerCase("en-US");
+        if (!COMMERCE_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`))) continue;
+        if (!hosts.includes(hostname)) hosts.push(hostname);
+      } catch {
+      }
+    }
+    return hosts;
+  }
   function trustedBilibiliUrl(raw, baseUrl) {
     try {
       const url = new URL(raw, baseUrl);
@@ -479,6 +808,29 @@
     const type = classifyCardFromSignals(signals);
     return { type, typeKnown: type !== "unknown", signals };
   }
+  function extractContentFilterSignals(wrapper, baseUrl = "https://t.bilibili.com/", knownText = null) {
+    const card = wrapper.matches?.(SELECTORS.card) ? wrapper : wrapper.querySelector?.(SELECTORS.card) ?? wrapper;
+    const text = typeof knownText === "string" ? knownText : cardTextWithoutOwnUi(card);
+    const commerceHosts = findCommerceHosts(card, baseUrl);
+    const productRoots = productComponentRoots(card);
+    const hasProductComponent = productRoots.length > 0;
+    const hasGiveawayModule = Boolean(card.querySelector([
+      ".bili-dyn-card-lottery",
+      ".dyn-card-lottery",
+      "[class*='lottery-card']",
+      "[data-module='lottery']",
+      "[data-type='lottery']"
+    ].join(", ")));
+    return createContentSignals({
+      text,
+      hasProductComponent,
+      hasProductRecommendationLabel: productRoots.some((element) => PRODUCT_RECOMMENDATION_PATTERN.test(elementText(element))),
+      hasPurchaseButton: productRoots.some((element) => hasPurchaseControl(element)),
+      hasCommerceLink: commerceHosts.length > 0,
+      commerceHosts,
+      hasGiveawayModule
+    });
+  }
   function findTrustedUrls(wrapper, baseUrl = "https://t.bilibili.com/") {
     const selectors = [
       ".bili-dyn-time[href]",
@@ -521,13 +873,12 @@
       ".bili-dyn-card-live__title",
       ".bili-dyn-card-article__title"
     ]);
-    const textSource = card.cloneNode(true);
-    textSource.querySelectorAll(".btf-card-tools").forEach((element) => element.remove());
-    const rawText = String(textSource.innerText ?? textSource.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 2e4);
+    const rawText = cardTextWithoutOwnUi(card);
     const dynamicId = extractDynamicId(wrapper, baseUrl);
     const relatedUrls = findTrustedUrls(wrapper, baseUrl);
     const discoveredUrl = relatedUrls[0] ?? "";
     const classification = classifyElement(wrapper);
+    const contentSignals = extractContentFilterSignals(wrapper, baseUrl, rawText);
     const fingerprint = fnv1a([authorMid, authorName, time, discoveredUrl, rawText.slice(0, 800)].join("|"));
     const identity = dynamicId ? `d:${dynamicId}` : `session:${fingerprint}`;
     return {
@@ -545,7 +896,8 @@
       relatedUrls,
       linkKnown: Boolean(discoveredUrl || dynamicId),
       type: classification.type === "unknown" ? "other" : classification.type,
-      typeKnown: classification.typeKnown
+      typeKnown: classification.typeKnown,
+      contentSignals
     };
   }
 
@@ -723,7 +1075,62 @@
     pointer-events: none;
   }
 
-  .bili-dyn-list__item[data-btf-hidden-reason] {
+  html:not([data-btf-view-mode="hidden"]) .bili-dyn-list__item[data-btf-hidden-reason] {
+    display: none !important;
+  }
+
+  html[data-btf-view-mode="hidden"] .bili-dyn-list__item:not([data-btf-hidden-reason]) {
+    display: none !important;
+  }
+
+  .bili-dyn-list__item > .btf-hidden-reason {
+    display: none;
+  }
+
+  html[data-btf-view-mode="hidden"] .bili-dyn-list__item[data-btf-hidden-reason] > .btf-hidden-reason {
+    display: block;
+    width: fit-content;
+    max-width: calc(100% - 16px);
+    margin: 0 0 6px 8px;
+    padding: 3px 8px;
+    border: 1px solid var(--line_regular, #e3e5e7);
+    border-radius: 999px;
+    background: var(--bg1, #fff);
+    color: var(--btf-card-muted);
+    font: 600 var(--btf-card-action-font-size)/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bili-dyn-list__item > .btf-card-collapse-toggle {
+    display: none;
+  }
+
+  .bili-dyn-list__item[data-btf-collapsed-reason] > .btf-card-collapse-toggle {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 58px;
+    padding: 12px 16px;
+    border: 1px dashed var(--line_regular, #e3e5e7);
+    border-radius: 10px;
+    background: var(--bg1, #fff);
+    color: var(--btf-card-muted);
+    cursor: pointer;
+    font: 600 var(--btf-empty-font-size)/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    text-align: center;
+  }
+
+  .bili-dyn-list__item[data-btf-collapsed-reason] > .btf-card-collapse-toggle:hover,
+  .bili-dyn-list__item[data-btf-collapsed-reason] > .btf-card-collapse-toggle:focus-visible {
+    border-color: var(--btf-card-accent);
+    color: var(--btf-card-text);
+  }
+
+  .bili-dyn-list__item[data-btf-collapsed-reason]:not([data-btf-collapsed-expanded="true"]) > :not(.btf-card-collapse-toggle) {
     display: none !important;
   }
 
@@ -1078,6 +1485,19 @@
     text-align: center;
   }
 
+  .stat-button {
+    appearance: none;
+    width: 100%;
+    border: 0;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .stat-button:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--danger); }
+  .stat-button[aria-pressed="true"] { background: var(--danger-soft); box-shadow: inset 0 0 0 1px var(--danger); }
+  .stat-button:disabled { cursor: default; opacity: .68; }
+
   .stat strong { display: block; font-size: 1.333em; line-height: 1.25; font-variant-numeric: tabular-nums; }
   .stat span { color: var(--text-3); font-size: .833em; }
   .stat.hidden strong { color: var(--danger); }
@@ -1180,7 +1600,6 @@
   .switch[aria-checked="true"]::after { transform: translateX(16px); }
 
   .search,
-  .keywords,
   select {
     width: 100%;
     border: 1px solid var(--line);
@@ -1190,8 +1609,7 @@
   }
 
   .search { min-height: 34px; padding: 0 10px; font-size: 1em; }
-  .keywords { min-height: 66px; resize: vertical; padding: 8px 10px; font-size: 1em; line-height: 1.5; }
-  .search::placeholder, .keywords::placeholder { color: var(--text-3); }
+  .search::placeholder { color: var(--text-3); }
 
   .group-gesture-help {
     display: flex;
@@ -1286,6 +1704,11 @@
 
   .inline-check { display: inline-flex; align-items: center; gap: 6px; margin-top: 7px; color: var(--text-2); font-size: .917em; }
   .inline-check input { accent-color: var(--accent); }
+
+  .promotion-options { display: grid; gap: 10px; }
+  .promotion-option + .promotion-option { padding-top: 10px; border-top: 1px solid var(--line); }
+  .suspicious-field { padding-top: 2px; }
+  .promotion-note { margin: -2px 1px 0; color: var(--text-3); font-size: .833em; line-height: 1.5; }
 
   .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .field span { display: block; margin: 0 0 4px 2px; color: var(--text-3); font-size: .833em; }
@@ -1413,7 +1836,7 @@
 `;
 
   // src/main.js
-  var VERSION = "2.1.1";
+  var VERSION = "3.0.0";
   var STORAGE_PREFIX = "__bilibili_timeline_focus_v1__";
   var ROOT_ID = "btf-root";
   var GLOBAL_STYLE_ID = "btf-global-style";
@@ -1609,6 +2032,7 @@
     bodyObserver: null,
     pendingCards: /* @__PURE__ */ new Set(),
     scanFrame: 0,
+    statsFrame: 0,
     bindFrame: 0,
     refilterToken: 0,
     cardSignatures: /* @__PURE__ */ new WeakMap(),
@@ -1616,10 +2040,10 @@
     emptyNotice: null,
     status: { kind: "idle", message: "正在启动…" },
     stats: { total: 0, visible: 0, hidden: 0, unknown: 0 },
+    viewMode: "normal",
+    hiddenReasonSequence: 0,
     toastTimer: 0,
     toastUndo: null,
-    keywordTimer: 0,
-    keywordDraft: null,
     resetArmedUntil: 0,
     clearHiddenArmedUntil: 0,
     resetTimer: 0,
@@ -1663,16 +2087,6 @@
     state.settings = normalizeSettings(state.settings);
     Storage.write("settings", state.settings);
   }
-  function commitKeywordDraft({ refilter = true } = {}) {
-    if (state.keywordDraft == null) return false;
-    window.clearTimeout(state.keywordTimer);
-    state.keywordTimer = 0;
-    state.settings.keywords = parseKeywords(state.keywordDraft, { caseSensitive: state.settings.caseSensitive });
-    state.keywordDraft = null;
-    saveSettings();
-    if (refilter) void refilterAll();
-    return true;
-  }
   function saveGroupCache() {
     if (!state.uid) return;
     state.groupCache = normalizeGroupCache(state.groupCache);
@@ -1705,6 +2119,7 @@
     state.groupLoads.clear();
   }
   function resetAccountForDetection() {
+    setHiddenOnlyView(false, { announce: false });
     abortGroupLoads();
     state.uid = null;
     state.loggedIn = null;
@@ -1721,7 +2136,7 @@
   function clearAccountScopedCardUi() {
     for (const wrapper of document.querySelectorAll(SELECTORS.wrapper)) {
       const reason = wrapper.dataset.btfHiddenReason;
-      if (reason === "manual" || reason === "group") delete wrapper.dataset.btfHiddenReason;
+      if (reason === "manual" || reason === "group") clearHiddenDecision(wrapper);
       const watch = wrapper.querySelector(".btf-card-action[data-action='watch']");
       const hide = wrapper.querySelector(".btf-card-action[data-action='hide']");
       if (hide) {
@@ -1761,6 +2176,7 @@
     const sessionStatusChanged = state.loggedIn !== loggedIn;
     const shouldReload = identityChanged || !state.accountReady;
     if (identityChanged) {
+      setHiddenOnlyView(false, { announce: false });
       abortGroupLoads();
       state.sessionHiddenWrappers = /* @__PURE__ */ new WeakSet();
       state.sessionHiddenStableIds = /* @__PURE__ */ new WeakMap();
@@ -1863,7 +2279,7 @@
       </header>
       <div class="stats" aria-label="筛选统计">
         <div class="stat"><strong data-stat="visible">0</strong><span>显示</span></div>
-        <div class="stat hidden"><strong data-stat="hidden">0</strong><span>隐藏</span></div>
+        <button class="stat stat-button hidden hidden-view-toggle" type="button" aria-label="没有隐藏动态" aria-pressed="false" disabled title="没有可查看的隐藏动态"><strong data-stat="hidden">0</strong><span>隐藏</span></button>
         <div class="stat unknown"><strong data-stat="unknown">0</strong><span>待识别</span></div>
       </div>
       <div class="scroll-area">
@@ -1903,17 +2319,27 @@
             </div></div>
           </div>
         </section>
-        <section class="section collapsible-section" data-section-id="keywords">
+        <section class="section collapsible-section" data-section-id="promotion">
           <h3 class="section-title">
-            <button class="section-toggle" id="btf-toggle-keywords" type="button" data-section-id="keywords" aria-expanded="true" aria-controls="btf-section-keywords">
-              <span class="section-title-label">关键词屏蔽</span>
-              <span class="section-title-trailing"><span class="section-hint">每行一个 · 普通文本</span><span class="section-chevron" aria-hidden="true"></span></span>
+            <button class="section-toggle" id="btf-toggle-promotion" type="button" data-section-id="promotion" aria-expanded="true" aria-controls="btf-section-promotion">
+              <span class="section-title-label">推广与抽奖</span>
+              <span class="section-title-trailing"><span class="section-hint">组合信号识别</span><span class="section-chevron" aria-hidden="true"></span></span>
             </button>
           </h3>
-          <div class="section-collapse" id="btf-section-keywords" role="region" aria-labelledby="btf-toggle-keywords" aria-hidden="false">
+          <div class="section-collapse" id="btf-section-promotion" role="region" aria-labelledby="btf-toggle-promotion" aria-hidden="false">
             <div class="section-content"><div class="section-content-inner">
-              <textarea class="keywords" maxlength="10099" placeholder="例如：抽奖&#10;带货&#10;剧透" aria-label="关键词屏蔽规则"></textarea>
-              <label class="inline-check"><input class="case-sensitive" type="checkbox">区分大小写</label>
+              <div class="promotion-options">
+                <div class="switch-row promotion-option">
+                  <div class="switch-copy"><strong>屏蔽推广动态</strong><span>识别商品卡、购买引导和促销组合信号</span></div>
+                  <button class="switch promotion-switch" type="button" role="switch" aria-label="屏蔽推广动态" aria-checked="true"></button>
+                </div>
+                <div class="switch-row promotion-option">
+                  <div class="switch-copy"><strong>屏蔽互动抽奖</strong><span>识别抽奖行为、参与条件与开奖信息</span></div>
+                  <button class="switch giveaway-switch" type="button" role="switch" aria-label="屏蔽互动抽奖" aria-checked="true"></button>
+                </div>
+                <label class="field suspicious-field"><span>疑似内容处理</span><select class="suspicious-action" aria-label="疑似推广或抽奖内容处理方式"><option value="collapse">折叠，可手动展开</option><option value="show">正常显示</option></select></label>
+                <p class="promotion-note">根据多项特征综合判断；单独出现“价格”或“抽奖”等词不会触发。</p>
+              </div>
             </div></div>
           </div>
         </section>
@@ -1988,12 +2414,14 @@
       status: shadow.querySelector(".brand-status"),
       collapse: shadow.querySelector(".collapse"),
       enabled: shadow.querySelector(".enabled-switch"),
+      hiddenViewToggle: shadow.querySelector(".hidden-view-toggle"),
       sectionToggles: [...shadow.querySelectorAll(".section-toggle[data-section-id]")],
       groups: shadow.querySelector(".groups"),
       groupSearch: shadow.querySelector(".group-search"),
       typeChips: shadow.querySelector(".type-chips"),
-      keywords: shadow.querySelector(".keywords"),
-      caseSensitive: shadow.querySelector(".case-sensitive"),
+      promotionEnabled: shadow.querySelector(".promotion-switch"),
+      giveawayEnabled: shadow.querySelector(".giveaway-switch"),
+      suspiciousAction: shadow.querySelector(".suspicious-action"),
       theme: shadow.querySelector(".theme"),
       launcherCorner: shadow.querySelector(".launcher-corner"),
       panelDirection: shadow.querySelector(".panel-direction"),
@@ -2162,6 +2590,9 @@
   function bindUiEvents() {
     const ui = state.ui;
     ui.launcher.addEventListener("click", () => setPanelOpen(true));
+    ui.hiddenViewToggle.addEventListener("click", () => {
+      setHiddenOnlyView(state.viewMode !== "hidden");
+    });
     for (const toggle of ui.sectionToggles) {
       toggle.addEventListener("click", () => toggleCollapsibleSection(toggle.dataset.sectionId));
       const content = state.shadow.getElementById(toggle.getAttribute("aria-controls"));
@@ -2178,6 +2609,7 @@
     ui.collapse.addEventListener("click", () => setPanelOpen(false));
     ui.enabled.addEventListener("click", () => {
       state.settings.enabled = !state.settings.enabled;
+      if (!state.settings.enabled) setHiddenOnlyView(false, { announce: false });
       saveSettings();
       renderUi();
       void refilterAll();
@@ -2221,15 +2653,21 @@
       renderTypeChips();
       void refilterAll();
     });
-    ui.keywords.addEventListener("input", () => {
-      state.keywordDraft = ui.keywords.value;
-      window.clearTimeout(state.keywordTimer);
-      state.keywordTimer = window.setTimeout(() => commitKeywordDraft(), 220);
-    });
-    ui.caseSensitive.addEventListener("change", () => {
-      state.settings.caseSensitive = ui.caseSensitive.checked;
-      state.keywordDraft = ui.keywords.value;
-      commitKeywordDraft();
+    for (const [element, property] of [
+      [ui.promotionEnabled, "promotionEnabled"],
+      [ui.giveawayEnabled, "giveawayEnabled"]
+    ]) {
+      element.addEventListener("click", () => {
+        state.settings[property] = !state.settings[property];
+        saveSettings();
+        renderPromotionSettings();
+        void refilterAll();
+      });
+    }
+    ui.suspiciousAction.addEventListener("change", () => {
+      state.settings.suspiciousAction = ui.suspiciousAction.value;
+      saveSettings();
+      void refilterAll();
     });
     for (const [element, property] of [
       [ui.theme, "theme"],
@@ -2330,8 +2768,6 @@
     state.ui.panel.setAttribute("aria-hidden", String(!state.settings.panelOpen));
     state.ui.enabled.setAttribute("aria-checked", String(state.settings.enabled));
     state.ui.status.textContent = state.status.message;
-    state.ui.keywords.value = state.keywordDraft ?? state.settings.keywords.join("\n");
-    state.ui.caseSensitive.checked = state.settings.caseSensitive;
     state.ui.theme.value = state.settings.theme;
     state.ui.launcherCorner.value = state.settings.launcherCorner;
     state.ui.panelDirection.value = state.settings.panelDirection;
@@ -2342,11 +2778,18 @@
     renderCollapsibleSections();
     renderGroups(state.ui.groupSearch.value);
     renderTypeChips();
+    renderPromotionSettings();
     renderStats();
     renderCacheInfo();
     renderWatchLater();
     renderFontScaleControls();
     applyLayoutSettings();
+  }
+  function renderPromotionSettings() {
+    if (!state.ui.promotionEnabled) return;
+    state.ui.promotionEnabled.setAttribute("aria-checked", String(state.settings.promotionEnabled));
+    state.ui.giveawayEnabled.setAttribute("aria-checked", String(state.settings.giveawayEnabled));
+    state.ui.suspiciousAction.value = state.settings.suspiciousAction === "show" ? "show" : "collapse";
   }
   function renderFontScaleControls() {
     if (!state.ui.fontScale) return;
@@ -2434,6 +2877,43 @@
       (replacement ?? state.ui.groupSearch)?.focus({ preventScroll: true });
     }
   }
+  function applyViewMode() {
+    const hiddenView = state.viewMode === "hidden" && state.routeActive && state.settings.enabled;
+    state.viewMode = hiddenView ? "hidden" : "normal";
+    if (hiddenView) document.documentElement.dataset.btfViewMode = "hidden";
+    else delete document.documentElement.dataset.btfViewMode;
+    if (state.root) state.root.dataset.viewMode = state.viewMode;
+    for (const hide of document.querySelectorAll(".btf-card-action[data-action='hide']")) {
+      const wrapper = hide.closest(SELECTORS.wrapper);
+      if (wrapper) updateHideButton(wrapper);
+    }
+    const button = state.ui.hiddenViewToggle;
+    if (!button) return;
+    button.setAttribute("aria-pressed", String(hiddenView));
+    button.disabled = !state.settings.enabled || !hiddenView && state.stats.hidden === 0;
+    if (hiddenView) {
+      button.setAttribute("aria-label", `退出只看隐藏动态，当前已加载 ${state.stats.hidden} 条`);
+      button.title = "恢复显示未被隐藏的动态";
+    } else if (state.stats.hidden > 0) {
+      button.setAttribute("aria-label", `只看 ${state.stats.hidden} 条隐藏动态`);
+      button.title = "只显示当前已加载的隐藏动态";
+    } else {
+      button.setAttribute("aria-label", "没有隐藏动态");
+      button.title = "没有可查看的隐藏动态";
+    }
+  }
+  function setHiddenOnlyView(showHidden, { announce = true } = {}) {
+    const nextHidden = Boolean(showHidden);
+    if (nextHidden) updateStats();
+    if (nextHidden && (!state.routeActive || !state.settings.enabled || state.stats.hidden === 0)) return false;
+    state.viewMode = nextHidden ? "hidden" : "normal";
+    applyViewMode();
+    updateEmptyNotice();
+    if (announce) {
+      showToast(nextHidden ? `正在只看当前已加载的 ${state.stats.hidden} 条隐藏动态` : "已恢复显示未被隐藏的动态");
+    }
+    return true;
+  }
   function renderStats() {
     if (!state.shadow) return;
     for (const [key, value] of Object.entries({
@@ -2446,6 +2926,7 @@
     }
     state.ui.badge.textContent = String(state.stats.hidden);
     state.ui.badge.hidden = state.stats.hidden === 0;
+    applyViewMode();
   }
   function renderCacheInfo() {
     if (!state.ui.cacheInfo) return;
@@ -2477,6 +2958,7 @@
     delete html.dataset.btfDensity;
     delete html.dataset.btfWidth;
     delete html.dataset.btfFocus;
+    delete html.dataset.btfViewMode;
     html.style.removeProperty("--btf-card-action-font-size");
     html.style.removeProperty("--btf-empty-font-size");
     html.style.removeProperty("--btf-card-icon-font-size");
@@ -2573,7 +3055,7 @@
         if (!accountCookieStillCurrent(expectedCookie)) return hadCachedMembers;
         if (error.code === -101 && state.routeActive && generation === state.routeGeneration && state.uid === expectedUid) {
           transitionAccount(null, false);
-          setStatus("login", "登录状态已失效；关键词和类型筛选仍可使用");
+          setStatus("login", "登录状态已失效；类型与推广抽奖筛选仍可使用");
           renderUi();
           void refilterAll();
           return false;
@@ -2664,7 +3146,7 @@
     saveGroupCache();
   }
   function friendlyApiMessage(error, fallback) {
-    if (error?.code === -101) return "请先登录 B 站；关键词和类型筛选仍可使用";
+    if (error?.code === -101) return "请先登录 B 站；类型与推广抽奖筛选仍可使用";
     if (error?.status === 412 || error?.code === -352 || error?.code === -401) return "B站请求受限，已停止重试并保留缓存";
     if (error?.code === "TIMEOUT") return "B站接口响应超时，已保留缓存";
     if (error?.code === "NETWORK") return "当前网络不可用，已保留缓存";
@@ -2778,6 +3260,15 @@
     for (const wrapper of batch) processCardSafely(wrapper);
     updateStats();
   }
+  function queueStatsUpdate() {
+    if (state.statsFrame || !state.routeActive || state.destroyed) return;
+    const generation = state.routeGeneration;
+    state.statsFrame = requestAnimationFrame(() => {
+      state.statsFrame = 0;
+      if (!state.routeActive || state.destroyed || generation !== state.routeGeneration) return;
+      updateStats();
+    });
+  }
   function processCardSafely(wrapper, options) {
     try {
       processCard(wrapper, options);
@@ -2785,8 +3276,9 @@
       return true;
     } catch (error) {
       if (wrapper?.dataset) {
-        delete wrapper.dataset.btfHiddenReason;
+        clearHiddenDecision(wrapper);
         delete wrapper.dataset.btfAuthorKnown;
+        clearCollapsedCard(wrapper);
       }
       state.cardSignatures.delete(wrapper);
       if (wrapper && !state.cardErrors.has(wrapper)) {
@@ -2799,6 +3291,12 @@
   function processCard(wrapper, { force = false } = {}) {
     if (!wrapper?.isConnected || !wrapper.matches?.(SELECTORS.wrapper)) return;
     const model = extractCardModel(wrapper, location.href);
+    let contentSignalsSignature = "";
+    try {
+      contentSignalsSignature = fnv1a(JSON.stringify(model.contentSignals ?? null));
+    } catch {
+      contentSignalsSignature = "unavailable";
+    }
     const signature = [
       model.identity,
       model.authorMid,
@@ -2808,10 +3306,17 @@
       model.linkKnown,
       model.primaryUrl,
       model.relatedUrls.join(","),
+      contentSignalsSignature,
       fnv1a(model.text)
     ].join("|");
     const existingToolbar = wrapper.querySelector(".btf-card-tools");
-    if (!force && state.cardSignatures.get(wrapper) === signature && existingToolbar && cardToolbarPlacementIsCurrent(wrapper, existingToolbar)) return;
+    const collapseUiCurrent = !wrapper.hasAttribute("data-btf-collapsed-reason") || Boolean(wrapper.querySelector(":scope > .btf-card-collapse-toggle"));
+    const hiddenDescriptionId = wrapper.dataset.btfHiddenDescriptionId;
+    const hiddenDescription = wrapper.querySelector(":scope > .btf-hidden-reason");
+    const hiddenUiCurrent = !wrapper.hasAttribute("data-btf-hidden-reason") || Boolean(
+      hiddenDescriptionId && hiddenDescription?.id === hiddenDescriptionId && (wrapper.getAttribute("aria-describedby") || "").split(/\s+/).includes(hiddenDescriptionId)
+    );
+    if (!force && state.cardSignatures.get(wrapper) === signature && existingToolbar && cardToolbarPlacementIsCurrent(wrapper, existingToolbar) && collapseUiCurrent && hiddenUiCurrent) return;
     state.cardSignatures.set(wrapper, signature);
     wrapper.dataset.btfAuthorKnown = String(Boolean(model.authorMid));
     enhanceCard(wrapper);
@@ -2849,9 +3354,117 @@
     if (model.persistable || originMid !== nextMid) return false;
     return true;
   }
+  function hiddenReasonLabel(reason) {
+    switch (reason) {
+      case "manual":
+        return "本地手动隐藏";
+      case "group":
+        return "关注分组";
+      case "type":
+        return "内容类型";
+      case "promotion":
+        return "商品推广";
+      case "giveaway":
+        return "互动抽奖";
+      default:
+        return "筛选规则";
+    }
+  }
+  function setHiddenDecision(wrapper, reason, detail = "") {
+    const normalizedReason = String(reason || "filtered");
+    const normalizedDetail = String(detail || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    const description = `隐藏原因：${hiddenReasonLabel(normalizedReason)}${normalizedDetail ? ` · ${normalizedDetail}` : ""}`;
+    wrapper.dataset.btfHiddenReason = normalizedReason;
+    wrapper.dataset.btfHiddenDetail = description;
+    let descriptionId = wrapper.dataset.btfHiddenDescriptionId;
+    const duplicateId = descriptionId ? document.getElementById(descriptionId) : null;
+    if (!descriptionId || duplicateId && duplicateId.parentElement !== wrapper) {
+      descriptionId = `btf-hidden-reason-${++state.hiddenReasonSequence}`;
+      wrapper.dataset.btfHiddenDescriptionId = descriptionId;
+    }
+    let reasonNode = wrapper.querySelector(":scope > .btf-hidden-reason");
+    if (!reasonNode) {
+      reasonNode = document.createElement("div");
+      reasonNode.className = "btf-hidden-reason";
+      reasonNode.dataset.btfOwned = "hidden-reason";
+      reasonNode.setAttribute("role", "note");
+      wrapper.insertBefore(reasonNode, wrapper.firstChild);
+    }
+    reasonNode.id = descriptionId;
+    reasonNode.textContent = description;
+    const describedBy = new Set((wrapper.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+    describedBy.add(descriptionId);
+    wrapper.setAttribute("aria-describedby", [...describedBy].join(" "));
+  }
+  function clearHiddenDecision(wrapper) {
+    if (!wrapper?.dataset) return;
+    const descriptionId = wrapper.dataset.btfHiddenDescriptionId;
+    if (descriptionId) {
+      const describedBy = (wrapper.getAttribute("aria-describedby") || "").split(/\s+/).filter((token) => token && token !== descriptionId);
+      if (describedBy.length) wrapper.setAttribute("aria-describedby", describedBy.join(" "));
+      else wrapper.removeAttribute("aria-describedby");
+    }
+    delete wrapper.dataset.btfHiddenReason;
+    delete wrapper.dataset.btfHiddenDetail;
+    delete wrapper.dataset.btfHiddenDescriptionId;
+    wrapper.querySelector?.(":scope > .btf-hidden-reason")?.remove();
+  }
+  function collapsedReasonLabel(reason) {
+    if (reason === "giveaway") return "疑似互动抽奖";
+    if (reason === "promotion") return "疑似推广";
+    return "疑似需要过滤的内容";
+  }
+  function updateCollapsedCardToggle(wrapper) {
+    const toggle = wrapper.querySelector(":scope > .btf-card-collapse-toggle");
+    if (!toggle) return;
+    const expanded = wrapper.dataset.btfCollapsedExpanded === "true";
+    const label = collapsedReasonLabel(wrapper.dataset.btfCollapsedReason);
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.textContent = expanded ? `${label} · 点击收起` : `${label}，已折叠 · 点击展开`;
+    const detail = wrapper.dataset.btfCollapsedDetail;
+    toggle.title = `${expanded ? "收起这条动态" : "临时展开这条动态"}${detail ? `；判断依据：${detail}` : ""}`;
+  }
+  function collapseCard(wrapper, decision, model) {
+    const reason = String(decision?.reason || "suspicious");
+    const identity = String(model?.identity || "unknown");
+    if (wrapper.dataset.btfCollapsedReason !== reason || wrapper.dataset.btfCollapsedIdentity !== identity) {
+      delete wrapper.dataset.btfCollapsedExpanded;
+    }
+    wrapper.dataset.btfCollapsedReason = reason;
+    wrapper.dataset.btfCollapsedIdentity = identity;
+    wrapper.dataset.btfCollapsedDetail = String(decision?.detail || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    let toggle = wrapper.querySelector(":scope > .btf-card-collapse-toggle");
+    if (!toggle) {
+      toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "btf-card-collapse-toggle";
+      toggle.dataset.btfOwned = "collapse-toggle";
+      toggle.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        wrapper.dataset.btfCollapsedExpanded = String(wrapper.dataset.btfCollapsedExpanded !== "true");
+        updateCollapsedCardToggle(wrapper);
+      });
+      wrapper.insertBefore(toggle, wrapper.firstChild);
+    }
+    updateCollapsedCardToggle(wrapper);
+  }
+  function clearCollapsedCard(wrapper) {
+    if (!wrapper) return;
+    const toggle = wrapper.querySelector?.(":scope > .btf-card-collapse-toggle");
+    if (toggle && (document.activeElement === toggle || toggle.contains(document.activeElement))) {
+      state.ui.launcher?.focus({ preventScroll: true });
+    }
+    delete wrapper.dataset.btfCollapsedReason;
+    delete wrapper.dataset.btfCollapsedIdentity;
+    delete wrapper.dataset.btfCollapsedDetail;
+    delete wrapper.dataset.btfCollapsedExpanded;
+    toggle?.remove();
+  }
   function applyCardDecision(wrapper, model) {
     if (!state.settings.enabled) {
-      delete wrapper.dataset.btfHiddenReason;
+      clearHiddenDecision(wrapper);
+      clearCollapsedCard(wrapper);
       return;
     }
     if (state.sessionHiddenWrappers.has(wrapper)) {
@@ -2868,7 +3481,8 @@
           origin.migratedIdentity = model.identity;
           saveHiddenRecords();
         }
-        wrapper.dataset.btfHiddenReason = "manual";
+        clearCollapsedCard(wrapper);
+        setHiddenDecision(wrapper, "manual");
         return;
       }
     }
@@ -2879,8 +3493,15 @@
       authorGroupsMap: groupMap,
       hiddenRecords: state.hiddenRecords
     });
-    if (decision.visible) delete wrapper.dataset.btfHiddenReason;
-    else wrapper.dataset.btfHiddenReason = decision.reason;
+    const action = decision?.action ?? (decision?.visible === false ? "hide" : "show");
+    if (action === "collapse") {
+      clearHiddenDecision(wrapper);
+      collapseCard(wrapper, decision, model);
+      return;
+    }
+    clearCollapsedCard(wrapper);
+    if (action === "hide") setHiddenDecision(wrapper, decision.reason, decision.detail);
+    else clearHiddenDecision(wrapper);
   }
   function actionButton(icon, label, action) {
     const button = document.createElement("button");
@@ -2969,6 +3590,10 @@
     wrapper.dataset.btfEnhanced = "true";
   }
   function hideCard(wrapper, { focusUndo = false } = {}) {
+    if (state.viewMode === "hidden") {
+      showToast("只看隐藏动态时不可再次隐藏；请先退出该视图");
+      return;
+    }
     if (!requireCurrentAccount()) return;
     const model = extractCardModel(wrapper, location.href);
     const hiddenOrigin = hiddenOriginFromModel(model);
@@ -3027,16 +3652,27 @@
     updateWatchButton(wrapper, model);
     renderWatchLater();
   }
+  function updateHideButton(wrapper) {
+    const hide = wrapper.querySelector(".btf-card-action[data-action='hide']");
+    if (!hide) return;
+    if (!state.accountReady) {
+      hide.disabled = true;
+      hide.title = "正在确认账号";
+    } else if (state.viewMode === "hidden") {
+      hide.disabled = true;
+      hide.title = "只看隐藏动态时不可再次隐藏";
+    } else {
+      hide.disabled = false;
+      hide.title = "隐藏";
+    }
+    hide.setAttribute("aria-label", hide.title);
+  }
   function updateWatchButton(wrapper, model = extractCardModel(wrapper, location.href)) {
     const button = wrapper.querySelector(".btf-card-action[data-action='watch']");
     const hide = wrapper.querySelector(".btf-card-action[data-action='hide']");
     if (!button && !hide) return;
+    updateHideButton(wrapper);
     if (!state.accountReady) {
-      if (hide) {
-        hide.disabled = true;
-        hide.title = "正在确认账号";
-        hide.setAttribute("aria-label", hide.title);
-      }
       if (button) {
         button.disabled = true;
         button.setAttribute("aria-pressed", "false");
@@ -3045,11 +3681,6 @@
         button.querySelector(".btf-icon").textContent = "☆";
       }
       return;
-    }
-    if (hide) {
-      hide.disabled = false;
-      hide.title = "隐藏";
-      hide.setAttribute("aria-label", hide.title);
     }
     if (!button) return;
     if (!model.linkKnown) {
@@ -3171,7 +3802,6 @@
     }
   }
   function exportSettings() {
-    commitKeywordDraft();
     const payload = {
       product: "B站动态净览",
       schemaVersion: SCHEMA_VERSION,
@@ -3193,9 +3823,7 @@
     if (!file) return;
     try {
       const payload = JSON.parse(await file.text());
-      window.clearTimeout(state.keywordTimer);
-      state.keywordTimer = 0;
-      state.keywordDraft = null;
+      setHiddenOnlyView(false, { announce: false });
       state.settings = normalizeSettings(payload?.settings ?? payload);
       state.settings.panelOpen = true;
       state.panelResolvedDirection = null;
@@ -3251,9 +3879,7 @@
       return;
     }
     const panelOpen = true;
-    window.clearTimeout(state.keywordTimer);
-    state.keywordTimer = 0;
-    state.keywordDraft = null;
+    setHiddenOnlyView(false, { announce: false });
     state.settings = normalizeSettings({ ...DEFAULT_SETTINGS, panelOpen });
     state.panelResolvedDirection = null;
     saveSettings();
@@ -3288,6 +3914,10 @@
     });
   }
   function updateStats() {
+    if (state.statsFrame) {
+      cancelAnimationFrame(state.statsFrame);
+      state.statsFrame = 0;
+    }
     const wrappers = [...document.querySelectorAll(SELECTORS.wrapper)];
     const hidden = wrappers.filter((wrapper) => wrapper.hasAttribute("data-btf-hidden-reason")).length;
     const groupFiltering = activeGroupIds().length > 0;
@@ -3303,7 +3933,9 @@
   }
   function updateEmptyNotice() {
     if (!state.list?.isConnected) return;
-    const shouldShow = state.settings.enabled && state.stats.total > 0 && state.stats.visible === 0;
+    const hiddenViewEmpty = state.settings.enabled && state.viewMode === "hidden" && state.stats.hidden === 0;
+    const normalViewEmpty = state.settings.enabled && state.viewMode === "normal" && state.stats.total > 0 && state.stats.visible === 0;
+    const shouldShow = hiddenViewEmpty || normalViewEmpty;
     if (!shouldShow) {
       state.emptyNotice?.remove();
       state.emptyNotice = null;
@@ -3312,10 +3944,11 @@
     if (!state.emptyNotice?.isConnected) {
       const notice = document.createElement("div");
       notice.className = "btf-feed-empty";
-      notice.textContent = "当前条件下没有匹配的动态。可在“动态净览”中清空条件，或继续向下滚动加载更多。";
       state.list.insertAdjacentElement("afterend", notice);
       state.emptyNotice = notice;
     }
+    state.emptyNotice.dataset.viewMode = state.viewMode;
+    state.emptyNotice.textContent = hiddenViewEmpty ? "当前已加载范围内没有隐藏动态。再次点击“隐藏”统计卡即可返回普通动态。" : "当前条件下没有匹配的动态。可在“动态净览”中清空条件，或继续向下滚动加载更多。";
   }
   function bindList() {
     state.bindFrame = 0;
@@ -3330,13 +3963,19 @@
     state.list = list;
     state.listObserver = new MutationObserver((mutations) => {
       const wrappers = [];
+      let removedCard = false;
       for (const mutation of mutations) {
         const targetElement = mutation.target.nodeType === 1 ? mutation.target : mutation.target.parentElement;
-        if (targetElement?.closest?.(".btf-card-tools")) continue;
+        if (targetElement?.closest?.(".btf-card-tools, [data-btf-owned]")) continue;
         if (mutation.type === "attributes" || mutation.type === "characterData") {
           const closest = targetElement?.closest?.(SELECTORS.wrapper);
           if (closest) wrappers.push(closest);
           continue;
+        }
+        const targetWrapper = targetElement?.closest?.(SELECTORS.wrapper);
+        for (const node of mutation.removedNodes) {
+          if (node.nodeType === 1 && collectCardWrappers(node).length) removedCard = true;
+          if (targetWrapper) wrappers.push(targetWrapper);
         }
         for (const node of mutation.addedNodes) {
           if (node.nodeType === 3) {
@@ -3344,20 +3983,31 @@
             if (closest2) wrappers.push(closest2);
             continue;
           }
-          if (node.nodeType !== 1 || node.closest?.(".btf-card-tools")) continue;
+          if (node.nodeType !== 1 || node.closest?.(".btf-card-tools, [data-btf-owned]")) continue;
           const closest = node.closest?.(SELECTORS.wrapper);
           if (closest) wrappers.push(closest);
           wrappers.push(...collectCardWrappers(node));
         }
       }
       if (wrappers.length) queueCards(wrappers);
+      if (removedCard) queueStatsUpdate();
     });
     state.listObserver.observe(list, {
       childList: true,
       subtree: true,
       characterData: true,
       attributes: true,
-      attributeFilter: ["data-mid", "data-did", "data-url", "dyn-id", "href", "class"]
+      attributeFilter: [
+        "data-mid",
+        "data-did",
+        "data-url",
+        "data-module",
+        "data-type",
+        "data-dyn-card-type",
+        "dyn-id",
+        "href",
+        "class"
+      ]
     });
     queueCards(collectCardWrappers(list));
     if (state.loggedIn !== false && state.status.kind === "waiting") setStatus("ready", "动态列表已连接");
@@ -3387,9 +4037,10 @@
   }
   function clearOurCardChanges() {
     document.querySelectorAll(SELECTORS.wrapper).forEach((wrapper) => {
-      delete wrapper.dataset.btfHiddenReason;
+      clearHiddenDecision(wrapper);
       delete wrapper.dataset.btfEnhanced;
       delete wrapper.dataset.btfAuthorKnown;
+      clearCollapsedCard(wrapper);
       wrapper.querySelector(".btf-card-tools")?.remove();
       clearCardToolPlacement(wrapper);
     });
@@ -3400,6 +4051,8 @@
     if (state.routeActive || state.destroyed) return;
     const generation = ++state.routeGeneration;
     state.routeActive = true;
+    state.viewMode = "normal";
+    delete document.documentElement.dataset.btfViewMode;
     state.routeController?.abort();
     state.routeController = new AbortController();
     resetAccountForDetection();
@@ -3430,7 +4083,7 @@
   }
   function suspendRoute() {
     if (!state.routeActive) return;
-    commitKeywordDraft({ refilter: false });
+    setHiddenOnlyView(false, { announce: false });
     state.routeGeneration += 1;
     state.refilterToken += 1;
     state.routeActive = false;
@@ -3443,9 +4096,11 @@
     state.list = null;
     abortGroupLoads();
     if (state.scanFrame) cancelAnimationFrame(state.scanFrame);
+    if (state.statsFrame) cancelAnimationFrame(state.statsFrame);
     if (state.bindFrame) cancelAnimationFrame(state.bindFrame);
     if (state.panelFrame) cancelAnimationFrame(state.panelFrame);
     state.scanFrame = 0;
+    state.statsFrame = 0;
     state.bindFrame = 0;
     state.panelFrame = 0;
     state.launcherAnchor = null;
@@ -3453,12 +4108,10 @@
     state.panelResizeObserver?.disconnect();
     state.panelResizeObserver = null;
     state.pendingCards.clear();
-    window.clearTimeout(state.keywordTimer);
     window.clearTimeout(state.toastTimer);
     window.clearTimeout(state.accountRecheckTimer);
     window.clearTimeout(state.resetTimer);
     window.clearTimeout(state.clearHiddenTimer);
-    state.keywordTimer = 0;
     state.toastTimer = 0;
     state.accountRecheckTimer = 0;
     state.resetTimer = 0;

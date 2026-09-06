@@ -1,12 +1,12 @@
 {
   "name": "bilibili-timeline-focus",
-  "version": "2.1.1",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
-  "description": "B站动态分组筛选与本地阅读辅助油猴脚本",
+  "description": "B站动态分组、推广抽奖过滤与本地阅读辅助油猴脚本",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "node --check src/core.js && node --check src/dom.js && node --check src/layout.js && node --check src/style.js && node --check src/main.js && node --check scripts/build.mjs",
+    "check": "node --check src/content-filter.js && node --check src/core.js && node --check src/dom.js && node --check src/layout.js && node --check src/style.js && node --check src/main.js && node --check scripts/build.mjs",
     "test": "node --test",
     "verify": "npm run check && npm test && npm run build && node --check dist/BilibiliTimeline.user.js"
   },

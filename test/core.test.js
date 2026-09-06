@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_SETTINGS,
   normalizeSettings,
-  parseKeywords,
   evaluateGroup,
   evaluateCard,
   normalizeGroupCache,
@@ -35,7 +34,9 @@ function assertVisible(result, expected) {
 
 test('DEFAULT_SETTINGS is a safe baseline accepted by normalizeSettings', () => {
   assert.equal(DEFAULT_SETTINGS.enabled, true);
-  assert.deepEqual(DEFAULT_SETTINGS.keywords, []);
+  assert.equal(DEFAULT_SETTINGS.promotionEnabled, true);
+  assert.equal(DEFAULT_SETTINGS.giveawayEnabled, true);
+  assert.equal(DEFAULT_SETTINGS.suspiciousAction, 'collapse');
   assert.deepEqual(DEFAULT_SETTINGS.hiddenTypes, []);
   assert.deepEqual(DEFAULT_SETTINGS.collapsedSections, []);
   assert.deepEqual(DEFAULT_SETTINGS.groupStatesByUid, {});
@@ -53,13 +54,16 @@ test('normalizeSettings validates storage values and migrates legacy group state
     dock: 'left',
     launcherPosition: null,
     panelDirection: 'auto',
-    collapsedSections: ['layout', 'groups', 'layout', 'unknown'],
+    collapsedSections: ['layout', 'groups', 'promotion', 'layout', 'unknown'],
     fontScale: 100,
     theme: 'dark',
     density: 'compact',
     feedWidth: 'wide',
     hideSidebars: true,
-    keywords: ' C++\n[教程]\nC++ ',
+    promotionEnabled: false,
+    giveawayEnabled: true,
+    suspiciousAction: 'show',
+    keywords: '旧版字段会被丢弃',
     caseSensitive: true,
     hiddenTypes: ['video', 'image', 'video', 'VIDEO', 'invalid'],
     groupStatesByUid: {
@@ -72,19 +76,20 @@ test('normalizeSettings validates storage values and migrates legacy group state
   });
 
   assert.deepEqual(normalized, {
-    schemaVersion: 2,
+    schemaVersion: 3,
     enabled: false,
     panelOpen: true,
     launcherCorner: 'top-left',
     panelDirection: 'auto',
-    collapsedSections: ['groups', 'layout'],
+    collapsedSections: ['groups', 'promotion', 'layout'],
     fontScale: 100,
     theme: 'dark',
     density: 'compact',
     feedWidth: 'wide',
     hideSidebars: true,
-    keywords: ['C++', '[教程]'],
-    caseSensitive: true,
+    promotionEnabled: false,
+    giveawayEnabled: true,
+    suspiciousAction: 'show',
     hiddenTypes: ['video', 'image'],
     groupStatesByUid: {
       42: { study: 1, blocked: -1 },
@@ -93,12 +98,18 @@ test('normalizeSettings validates storage values and migrates legacy group state
     cacheHours: 72,
   });
   assert.equal('unexpectedKey' in normalized, false);
+  assert.equal('keywords' in normalized, false);
+  assert.equal('caseSensitive' in normalized, false);
 });
 
 test('normalizeSettings keeps only canonical collapsible section identifiers', () => {
   assert.deepEqual(
     normalizeSettings({ collapsedSections: ['layout', 'types', 'groups', 'types', null, 'future'] }).collapsedSections,
     ['groups', 'types', 'layout'],
+  );
+  assert.deepEqual(
+    normalizeSettings({ collapsedSections: ['keywords', 'groups'] }).collapsedSections,
+    ['groups', 'promotion'],
   );
   assert.deepEqual(normalizeSettings({ collapsedSections: 'groups' }).collapsedSections, []);
   assert.deepEqual(normalizeSettings({}).collapsedSections, []);
@@ -127,19 +138,6 @@ test('normalizeSettings validates fixed launcher corners, migrates legacy positi
   assert.equal(normalizeSettings({ launcherPosition: { x: 0.5, y: 'bad' }, dock: 'left' }).launcherCorner, 'bottom-left');
 });
 
-test('parseKeywords handles each entry as case-insensitive literal text', () => {
-  assert.deepEqual(
-    parseKeywords('  Alpha, beta；ALPHA\nC++\r\n[教程]  '),
-    ['Alpha, beta；ALPHA', 'C++', '[教程]'],
-  );
-  assert.deepEqual(parseKeywords([' Foo ', 'BAR', 'foo', null]), ['Foo', 'BAR']);
-  assert.deepEqual(
-    parseKeywords(['Alpha', 'alpha'], { caseSensitive: true }),
-    ['Alpha', 'alpha'],
-  );
-  assert.deepEqual(parseKeywords(null), []);
-});
-
 test('evaluateGroup implements neutral/include/exclude with exclusion priority', () => {
   assert.equal(evaluateGroup('m:101', AUTHOR_GROUPS, GROUP_STATES), true);
   assert.equal(evaluateGroup('m:103', AUTHOR_GROUPS, GROUP_STATES), false);
@@ -162,13 +160,14 @@ test('evaluateGroup implements neutral/include/exclude with exclusion priority',
   );
 });
 
-test('evaluateCard composes group, literal keyword, and type filters', () => {
+test('evaluateCard composes group and type filters without legacy keyword rules', () => {
   const settings = normalizeSettings({
     groupStatesByUid: {
       'viewer-42': GROUP_STATES,
     },
-    keywords: ['[广告]'],
     hiddenTypes: ['pgc'],
+    promotionEnabled: false,
+    giveawayEnabled: false,
   });
   const context = {
     uid: 'viewer-42',
@@ -189,7 +188,7 @@ test('evaluateCard composes group, literal keyword, and type filters', () => {
       settings,
       context,
     ),
-    false,
+    true,
   );
   assertVisible(
     evaluateCard(
@@ -241,23 +240,88 @@ test('evaluateCard composes group, literal keyword, and type filters', () => {
       settings,
       context,
     ),
-    false,
+    true,
+  );
+});
+
+test('evaluateCard hides high-confidence promotions and giveaways through independent switches', () => {
+  const promotion = {
+    identity: 'd:promotion',
+    type: 'image',
+    text: '美团和闪购25-25的券，快去美团app搜：332211，到手只要18元。',
+  };
+  const giveaway = {
+    identity: 'd:giveaway',
+    type: 'image',
+    text: '互动抽奖，给大家抽一个游戏，关注+转发即可参与，周日开奖。',
+  };
+
+  const promotionResult = evaluateCard(promotion, normalizeSettings({ promotionEnabled: true }));
+  assert.equal(promotionResult.visible, false);
+  assert.equal(promotionResult.action, 'hide');
+  assert.equal(promotionResult.reason, 'promotion');
+  assert.match(promotionResult.detail, /购物平台|App 搜索|优惠/);
+
+  assert.equal(
+    evaluateCard(promotion, normalizeSettings({ promotionEnabled: false })).action,
+    'show',
   );
 
-  // Brackets and other regular-expression metacharacters remain literal.
-  assert.doesNotThrow(() =>
-    evaluateCard(
-      { text: '只有一个左方括号 [', type: 'other' },
-      normalizeSettings({ keywords: ['['] }),
-    ),
+  const giveawayResult = evaluateCard(giveaway, normalizeSettings({ giveawayEnabled: true }));
+  assert.equal(giveawayResult.visible, false);
+  assert.equal(giveawayResult.action, 'hide');
+  assert.equal(giveawayResult.reason, 'giveaway');
+  assert.match(giveawayResult.detail, /抽奖|参与条件|开奖/);
+  assert.equal(
+    evaluateCard(giveaway, normalizeSettings({ giveawayEnabled: false })).action,
+    'show',
   );
-  assertVisible(
-    evaluateCard(
-      { text: '只有一个左方括号 [', type: 'other' },
-      normalizeSettings({ keywords: ['['] }),
-    ),
-    false,
+});
+
+test('evaluateCard collapses medium-confidence content and can leave it visible', () => {
+  const suspicious = {
+    identity: 'd:suspicious',
+    type: 'image',
+    text: '【大漏】元气森林气泡水12瓶到手26元，限时补贴，赶紧冲！',
+  };
+  const collapsed = evaluateCard(suspicious, normalizeSettings({ suspiciousAction: 'collapse' }));
+  assert.equal(collapsed.visible, true);
+  assert.equal(collapsed.action, 'collapse');
+  assert.equal(collapsed.reason, 'promotion');
+
+  const shown = evaluateCard(suspicious, normalizeSettings({ suspiciousAction: 'show' }));
+  assert.equal(shown.visible, true);
+  assert.equal(shown.action, 'show');
+  assert.equal(shown.reason, null);
+});
+
+test('evaluateCard considers promotion and giveaway categories independently and preserves filter priority', () => {
+  const mixed = {
+    identity: 'd:mixed',
+    authorMid: '101',
+    type: 'image',
+    text: '互动抽奖：关注并转发即可参与，明日开奖。美团 APP 搜 332211，领取25元优惠券。',
+  };
+  const giveawayOnly = evaluateCard(mixed, normalizeSettings({
+    promotionEnabled: false,
+    giveawayEnabled: true,
+  }));
+  assert.equal(giveawayOnly.action, 'hide');
+  assert.equal(giveawayOnly.reason, 'giveaway');
+
+  const disabled = evaluateCard(mixed, normalizeSettings({ enabled: false }));
+  assert.deepEqual(disabled, { visible: true, action: 'show', reason: null });
+
+  const manual = evaluateCard(mixed, normalizeSettings(), {
+    hiddenRecords: { 'd:mixed': Date.now() },
+  });
+  assert.equal(manual.reason, 'manual');
+
+  const typed = evaluateCard(
+    { ...mixed, type: 'image' },
+    normalizeSettings({ hiddenTypes: ['image'] }),
   );
+  assert.equal(typed.reason, 'type');
 });
 
 test('normalizeGroupCache returns the standard schema plus a derived lookup', () => {
@@ -286,7 +350,7 @@ test('normalizeGroupCache returns the standard schema plus a derived lookup', ()
   };
 
   assert.deepEqual(normalizeGroupCache(raw), {
-    schemaVersion: 2,
+    schemaVersion: 3,
     uid: '42',
     fetchedAt: 1_700_000_000_123,
     groups: [
@@ -318,7 +382,7 @@ test('normalizeGroupCache returns the standard schema plus a derived lookup', ()
   });
 
   assert.deepEqual(normalizeGroupCache(null), {
-    schemaVersion: 2,
+    schemaVersion: 3,
     uid: null,
     fetchedAt: 0,
     groups: [],

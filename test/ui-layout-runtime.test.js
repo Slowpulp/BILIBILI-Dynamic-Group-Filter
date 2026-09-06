@@ -64,14 +64,29 @@ function mouseClick(window, element) {
   }));
 }
 
-async function createRuntime({ settings = null, visualViewportState = null } = {}) {
+const card = ({ did, kind = "video", title = "测试动态" }) => `
+  <div class="bili-dyn-list__item" data-did="${did}">
+    <div class="bili-dyn-item">
+      <div class="bili-dyn-item__header" data-mid="${did}">
+        <div class="bili-dyn-title"><span class="bili-dyn-title__text">作者 ${did}</span></div>
+        <div class="bili-dyn-time"><a href="/opus/${did}">刚刚</a></div>
+      </div>
+      <div class="bili-dyn-content">
+        ${kind === "video"
+          ? `<a class="bili-dyn-card-video" dyn-id="${did}" href="/video/BV1xx411c7mD"><span class="bili-dyn-card-video__title">${title}</span></a>`
+          : `<div class="dyn-card-opus" dyn-id="${did}"><div class="dyn-card-opus__title">${title}</div></div>`}
+      </div>
+    </div>
+  </div>`;
+
+async function createRuntime({ settings = null, visualViewportState = null, cards = "" } = {}) {
   const virtualConsole = new VirtualConsole();
   const runtimeErrors = [];
   virtualConsole.on("jsdomError", (error) => runtimeErrors.push(error));
   virtualConsole.on("error", (...args) => runtimeErrors.push(args));
   const dom = new JSDOM(`<!doctype html><html><head></head><body>
     <main class="bili-dyn-home--visitor">
-      <div class="bili-dyn-list"><div class="bili-dyn-list__items"></div></div>
+      <div class="bili-dyn-list"><div class="bili-dyn-list__items">${cards}</div></div>
     </main>
   </body></html>`, {
     url: "https://t.bilibili.com/",
@@ -254,9 +269,11 @@ test("pointer drags and arrow keys cannot move a fixed corner, while resize and 
 test("four modules collapse independently, preserve controls and focus, and restore together", async () => {
   const runtime = await createRuntime({
     settings: {
-      collapsedSections: ["keywords", "groups"],
+      collapsedSections: ["promotion", "groups"],
       hiddenTypes: ["video"],
-      keywords: ["抽奖"],
+      promotionEnabled: false,
+      giveawayEnabled: true,
+      suspiciousAction: "show",
     },
   });
   const { window, root, shadow } = runtime;
@@ -264,12 +281,16 @@ test("four modules collapse independently, preserve controls and focus, and rest
     [...shadow.querySelectorAll(".section-toggle[data-section-id]")]
       .map((toggle) => [toggle.dataset.sectionId, toggle]),
   );
-  assert.deepEqual([...toggles.keys()], ["groups", "types", "keywords", "layout"]);
+  assert.deepEqual([...toggles.keys()], ["groups", "types", "promotion", "layout"]);
+  assert.equal(shadow.querySelector(".keywords"), null, "the free-form keyword module is removed");
+  assert.equal(shadow.querySelector(".promotion-switch").getAttribute("aria-checked"), "false");
+  assert.equal(shadow.querySelector(".giveaway-switch").getAttribute("aria-checked"), "true");
+  assert.equal(shadow.querySelector(".suspicious-action").value, "show");
 
   for (const sectionId of toggles.keys()) {
     const toggle = toggles.get(sectionId);
     const content = shadow.getElementById(toggle.getAttribute("aria-controls"));
-    const initiallyCollapsed = sectionId === "groups" || sectionId === "keywords";
+    const initiallyCollapsed = sectionId === "groups" || sectionId === "promotion";
     assert.equal(toggle.tagName, "BUTTON");
     assert.equal(toggle.getAttribute("aria-expanded"), String(!initiallyCollapsed));
     assert.equal(content.getAttribute("aria-hidden"), String(initiallyCollapsed));
@@ -285,14 +306,19 @@ test("four modules collapse independently, preserve controls and focus, and rest
   videoChip.focus();
   toggles.get("types").click();
   assert.equal(shadow.activeElement, toggles.get("types"));
-  assert.deepEqual(savedSettings(window).collapsedSections, ["groups", "types", "keywords"]);
+  assert.deepEqual(savedSettings(window).collapsedSections, ["groups", "types", "promotion"]);
 
   toggles.get("types").click();
   assert.equal(videoChip.getAttribute("aria-pressed"), "true", "folding must not reset feature state");
-  assert.equal(shadow.querySelector(".keywords").value, "抽奖");
+  shadow.querySelector(".promotion-switch").click();
+  assert.equal(savedSettings(window).promotionEnabled, true);
+  const suspiciousAction = shadow.querySelector(".suspicious-action");
+  suspiciousAction.value = "collapse";
+  suspiciousAction.dispatchEvent(new window.Event("change", { bubbles: true }));
+  assert.equal(savedSettings(window).suspiciousAction, "collapse");
   toggles.get("types").click();
   toggles.get("layout").click();
-  assert.deepEqual(savedSettings(window).collapsedSections, ["groups", "types", "keywords", "layout"]);
+  assert.deepEqual(savedSettings(window).collapsedSections, ["groups", "types", "promotion", "layout"]);
   assert.equal(shadow.querySelectorAll('.collapsible-section[data-collapsed="true"]').length, 4);
 
   const persistedSettings = savedSettings(window);
@@ -306,8 +332,241 @@ test("four modules collapse independently, preserve controls and focus, and rest
     assert.equal(content.hasAttribute("inert"), true);
   }
   restored.shadow.querySelector('[data-section-id="groups"].section-toggle').click();
-  assert.deepEqual(savedSettings(restored.window).collapsedSections, ["types", "keywords", "layout"]);
+  assert.deepEqual(savedSettings(restored.window).collapsedSections, ["types", "promotion", "layout"]);
   destroyRuntime(restored);
+});
+
+test("promotion controls hide high-confidence content and keep suspicious cards expandable", async () => {
+  const runtime = await createRuntime({
+    settings: {
+      promotionEnabled: true,
+      giveawayEnabled: true,
+      suspiciousAction: "collapse",
+    },
+    cards: [
+      card({ did: "900000001", kind: "image", title: "淘宝口令 ABCDE123，限时快冲，同款购买链接在简介。" }),
+      card({ did: "900000002", kind: "image", title: "互动抽奖：关注并转发即可参与，周日开奖，送出三份游戏兑换码。" }),
+    ].join(""),
+  });
+  const { window, shadow } = runtime;
+  const suspicious = window.document.querySelector('[data-did="900000001"]');
+  const giveaway = window.document.querySelector('[data-did="900000002"]');
+
+  await waitFor(() => {
+    assert.equal(suspicious.dataset.btfCollapsedReason, "promotion");
+    assert.equal(giveaway.dataset.btfHiddenReason, "giveaway");
+    assert.match(giveaway.dataset.btfHiddenDetail, /隐藏原因：互动抽奖/);
+    assert.equal(shadow.querySelector('[data-stat="visible"]').textContent, "1");
+    assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "1");
+  });
+
+  const reveal = suspicious.querySelector(":scope > .btf-card-collapse-toggle");
+  assert.ok(reveal);
+  assert.equal(reveal.getAttribute("aria-expanded"), "false");
+  reveal.click();
+  assert.equal(suspicious.dataset.btfCollapsedExpanded, "true");
+  assert.equal(reveal.getAttribute("aria-expanded"), "true");
+  reveal.click();
+  assert.equal(suspicious.dataset.btfCollapsedExpanded, "false");
+
+  const suspiciousAction = shadow.querySelector(".suspicious-action");
+  suspiciousAction.value = "show";
+  suspiciousAction.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await waitFor(() => {
+    assert.equal(suspicious.hasAttribute("data-btf-collapsed-reason"), false);
+    assert.equal(suspicious.querySelector(".btf-card-collapse-toggle"), null);
+    assert.equal(giveaway.dataset.btfHiddenReason, "giveaway");
+  });
+
+  shadow.querySelector(".giveaway-switch").click();
+  await waitFor(() => {
+    assert.equal(giveaway.hasAttribute("data-btf-hidden-reason"), false);
+    assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "0");
+  });
+  destroyRuntime(runtime);
+});
+
+test("collapsed controls recover from DOM replacement and expanded state follows the card identity", async () => {
+  const runtime = await createRuntime({
+    settings: { promotionEnabled: true, suspiciousAction: "collapse" },
+    cards: card({ did: "905000001", kind: "image", title: "淘宝口令 ABCDE123，限时快冲，同款购买链接在简介。" }),
+  });
+  const { window } = runtime;
+  const wrapper = window.document.querySelector('[data-did="905000001"]');
+  let firstToggle;
+  await waitFor(() => {
+    firstToggle = wrapper.querySelector(":scope > .btf-card-collapse-toggle");
+    assert.ok(firstToggle);
+    assert.ok(wrapper.dataset.btfCollapsedIdentity);
+  });
+
+  firstToggle.remove();
+  let replacement;
+  await waitFor(() => {
+    replacement = wrapper.querySelector(":scope > .btf-card-collapse-toggle");
+    assert.ok(replacement);
+    assert.notEqual(replacement, firstToggle, "a Bilibili VDOM removal must not leave collapsed content inaccessible");
+  });
+
+  replacement.click();
+  assert.equal(wrapper.dataset.btfCollapsedExpanded, "true");
+  const previousIdentity = wrapper.dataset.btfCollapsedIdentity;
+  wrapper.dataset.did = "905000009";
+  wrapper.querySelector(".bili-dyn-item__header").dataset.mid = "905000009";
+  wrapper.querySelector("[dyn-id]").setAttribute("dyn-id", "905000009");
+  wrapper.querySelector(".bili-dyn-time a").setAttribute("href", "/opus/905000009");
+
+  await waitFor(() => {
+    assert.notEqual(wrapper.dataset.btfCollapsedIdentity, previousIdentity);
+    assert.equal(wrapper.hasAttribute("data-btf-collapsed-expanded"), false);
+    assert.equal(wrapper.querySelector(":scope > .btf-card-collapse-toggle")?.getAttribute("aria-expanded"), "false");
+  });
+  destroyRuntime(runtime);
+});
+
+test("removing a focused collapse control moves focus to the persistent launcher", async () => {
+  const runtime = await createRuntime({
+    settings: { promotionEnabled: true, suspiciousAction: "collapse" },
+    cards: card({ did: "906000001", kind: "image", title: "淘宝口令 ABCDE123，限时快冲，同款购买链接在简介。" }),
+  });
+  const { window, shadow } = runtime;
+  const wrapper = window.document.querySelector('[data-did="906000001"]');
+  let reveal;
+  await waitFor(() => {
+    reveal = wrapper.querySelector(":scope > .btf-card-collapse-toggle");
+    assert.ok(reveal);
+  });
+  reveal.focus();
+  assert.equal(window.document.activeElement, reveal);
+
+  const suspiciousAction = shadow.querySelector(".suspicious-action");
+  suspiciousAction.value = "show";
+  suspiciousAction.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await waitFor(() => {
+    assert.equal(wrapper.querySelector(":scope > .btf-card-collapse-toggle"), null);
+    assert.equal(shadow.activeElement, shadow.querySelector(".launcher"));
+  });
+  destroyRuntime(runtime);
+});
+
+test("hidden statistic toggles an accessible hidden-only view without changing counts", async () => {
+  const runtime = await createRuntime({
+    settings: { hiddenTypes: ["video"] },
+    cards: [
+      card({ did: "910000001", kind: "video", title: "应隐藏的视频" }),
+      card({ did: "910000002", kind: "image", title: "应显示的图文" }),
+    ].join(""),
+  });
+  const { window, root, shadow } = runtime;
+  let hiddenCard;
+  await waitFor(() => {
+    hiddenCard = window.document.querySelector('[data-did="910000001"]');
+    assert.equal(hiddenCard.dataset.btfHiddenReason, "type");
+    assert.equal(hiddenCard.dataset.btfHiddenDetail, "隐藏原因：内容类型");
+    const reasonNode = hiddenCard.querySelector(":scope > .btf-hidden-reason");
+    assert.equal(reasonNode?.textContent, "隐藏原因：内容类型");
+    assert.equal(reasonNode?.dataset.btfOwned, "hidden-reason");
+    assert.equal(reasonNode?.getAttribute("role"), "note");
+    assert.ok(reasonNode?.id);
+    assert.ok((hiddenCard.getAttribute("aria-describedby") || "").split(/\s+/).includes(reasonNode.id));
+    assert.equal(shadow.querySelector('[data-stat="visible"]').textContent, "1");
+    assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "1");
+    assert.equal(hiddenCard.querySelector(".btf-card-action[data-action='hide']")?.disabled, false);
+  });
+
+  const hiddenToggle = shadow.querySelector(".hidden-view-toggle");
+  assert.equal(hiddenToggle.tagName, "BUTTON");
+  assert.equal(hiddenToggle.disabled, false);
+  assert.equal(hiddenToggle.getAttribute("aria-pressed"), "false");
+  hiddenToggle.click();
+  assert.equal(window.document.documentElement.dataset.btfViewMode, "hidden");
+  assert.equal(root.dataset.viewMode, "hidden");
+  assert.equal(hiddenToggle.getAttribute("aria-pressed"), "true");
+  assert.equal(shadow.querySelector('[data-stat="visible"]').textContent, "1");
+  assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "1");
+  const hiddenCardHide = hiddenCard.querySelector(".btf-card-action[data-action='hide']");
+  assert.equal(hiddenCardHide.disabled, true);
+  assert.match(hiddenCardHide.title, /只看隐藏动态/);
+  hiddenCardHide.click();
+  assert.equal(hiddenCard.dataset.btfHiddenReason, "type", "hidden-only view cannot convert a rule hide into a manual hide");
+
+  hiddenToggle.click();
+  assert.equal(hiddenCardHide.disabled, false, "normal view restores the local hide action");
+  assert.equal(hiddenCardHide.title, "隐藏");
+  hiddenToggle.click();
+
+  shadow.querySelector('button[data-type="video"]').click();
+  await waitFor(() => {
+    assert.equal(window.document.querySelectorAll("[data-btf-hidden-reason]").length, 0);
+    assert.equal(hiddenCard.querySelector(":scope > .btf-hidden-reason"), null);
+    assert.equal(hiddenCard.hasAttribute("aria-describedby"), false);
+    assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "0");
+    assert.match(window.document.querySelector(".btf-feed-empty")?.textContent || "", /没有隐藏动态/);
+  });
+  assert.equal(window.document.documentElement.dataset.btfViewMode, "hidden", "zero results keep an exit path");
+  assert.equal(hiddenToggle.disabled, false);
+
+  hiddenToggle.click();
+  assert.equal(window.document.documentElement.hasAttribute("data-btf-view-mode"), false);
+  assert.equal(hiddenToggle.getAttribute("aria-pressed"), "false");
+  assert.equal(hiddenToggle.disabled, true);
+  assert.equal(window.document.querySelector(".btf-feed-empty"), null);
+
+  shadow.querySelector('button[data-type="video"]').click();
+  await waitFor(() => assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "1"));
+  hiddenToggle.click();
+  shadow.querySelector(".enabled-switch").click();
+  assert.equal(window.document.documentElement.hasAttribute("data-btf-view-mode"), false, "turning filtering off exits hidden view immediately");
+  await waitFor(() => assert.equal(window.document.querySelectorAll("[data-btf-hidden-reason]").length, 0));
+
+  shadow.querySelector(".enabled-switch").click();
+  await waitFor(() => assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "1"));
+  hiddenToggle.click();
+  window.history.pushState({}, "", "/123456");
+  await waitFor(() => assert.equal(window.document.getElementById("btf-root"), null));
+  assert.equal(window.document.documentElement.hasAttribute("data-btf-view-mode"), false, "leaving the feed route clears view mode");
+
+  destroyRuntime(runtime);
+});
+
+test("removed cards update statistics and stale counts cannot open an empty hidden-only view", async () => {
+  const runtime = await createRuntime({
+    settings: { hiddenTypes: ["video"] },
+    cards: [
+      card({ did: "920000001", kind: "video", title: "会被隐藏的视频" }),
+      card({ did: "920000002", kind: "image", title: "普通图文" }),
+    ].join(""),
+  });
+  const { window, shadow } = runtime;
+  const hiddenCard = window.document.querySelector('[data-did="920000001"]');
+  const visibleCard = window.document.querySelector('[data-did="920000002"]');
+  let firstReasonNode;
+  await waitFor(() => {
+    firstReasonNode = hiddenCard.querySelector(":scope > .btf-hidden-reason");
+    assert.ok(firstReasonNode);
+    assert.equal(shadow.querySelector('[data-stat="visible"]').textContent, "1");
+    assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "1");
+  });
+
+  firstReasonNode.remove();
+  await waitFor(() => {
+    const replacement = hiddenCard.querySelector(":scope > .btf-hidden-reason");
+    assert.ok(replacement);
+    assert.notEqual(replacement, firstReasonNode);
+    assert.ok((hiddenCard.getAttribute("aria-describedby") || "").split(/\s+/).includes(replacement.id));
+  });
+
+  visibleCard.remove();
+  await waitFor(() => assert.equal(shadow.querySelector('[data-stat="visible"]').textContent, "0"));
+
+  const hiddenToggle = shadow.querySelector(".hidden-view-toggle");
+  hiddenCard.remove();
+  hiddenToggle.click();
+  assert.equal(window.document.documentElement.hasAttribute("data-btf-view-mode"), false);
+  assert.equal(hiddenToggle.getAttribute("aria-pressed"), "false");
+  assert.equal(hiddenToggle.disabled, true);
+  assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "0");
+  destroyRuntime(runtime);
 });
 
 test("multi-section collapse keeps panel direction stable and recomputes its bounded position", async () => {
