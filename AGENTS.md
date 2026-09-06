@@ -18,6 +18,8 @@
 - 发布前必须同步 `package.json`、`package-lock.json`、`src/userscript.meta.txt`、源码版本常量和 `CHANGELOG.md`，运行 `npm run verify`，并重新生成、纳入 `dist/BilibiliTimeline.user.js`。
 - 只有验证通过后才能创建发布提交和版本标签；标签统一使用 `v<major>.<minor>.<patch>`，并写明本次主要变化和验证结果。
 - 推送正式版本标签后，以该标签创建同名 GitHub Release，附上 `dist/BilibiliTimeline.user.js` 和包含其 SHA-256 的 `SHA256SUMS.txt`；Release 说明应概括本版变化与验证结果。
+- 开发学习指南的维护源是 `docs/DEVELOPMENT_GUIDE.zh-CN.md`，生成器是 `scripts/build-study-guide.py`，成品固定输出到 `04_Deliverables/B站动态分组筛选-开发设计与演进指南.pdf`；文档依赖记录在 `requirements-docs.txt`。
+- 指南内容变化时必须重新运行 `npm run build:guide`，用 Poppler 渲染全部 PDF 页面并完成视觉检查；Markdown 源稿与 PDF 成品应进入同一发布提交。涉及指南的 Release 还应附上 PDF，并把脚本与 PDF 的 SHA-256 一并写入 `SHA256SUMS.txt`。
 - `src/userscript.meta.txt` 中的 `@updateURL` 与 `@downloadURL` 使用仓库 `main` 分支的 GitHub Raw 构建产物地址；变更仓库名、默认分支或产物路径时必须同步更新并验证。
 - 不把依赖目录、临时文件、账号数据、Cookie 或其他敏感内容加入版本库；提交前必须检查待提交清单。
 - 若工作区含有与当前需求无关的用户改动，应保留并排除在本次提交之外，不得擅自覆盖或一起提交。

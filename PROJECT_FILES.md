@@ -26,8 +26,8 @@
 <!-- project-file-manager:inventory:start -->
 ## 当前库存（自动生成）
 
-更新时间：`2026-09-05T16:26:10.5524191Z`
-最近动作：建立 Git 发布基线
+更新时间：`2026-09-06T17:00:42.319789Z`
+最近动作：生成 dry-run 计划 `plan-20260906T170042110975Z`（未移动文件）
 
 | 目录 | 文件数 | 字节数 |
 |---|---:|---:|
@@ -35,8 +35,8 @@
 | `01_Source` | 0 | 0 |
 | `02_Working` | 0 | 0 |
 | `03_Versions` | 0 | 0 |
-| `04_Deliverables` | 0 | 0 |
+| `04_Deliverables` | 1 | 734960 |
 | `05_References` | 1 | 3964 |
 
-Git：当前项目以发布提交和 annotated tag 管理代码版本
+Git：Git 工作区干净
 <!-- project-file-manager:inventory:end -->

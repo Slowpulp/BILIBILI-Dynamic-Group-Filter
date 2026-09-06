@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站动态净览 - 分组筛选与阅读助手
 // @namespace    bilibili-timeline-focus.local
-// @version      3.0.1
+// @version      3.0.2
 // @description  按关注分组筛选B站动态，并提供推广抽奖识别、类型过滤、隐藏内容查看、本地稍后看与布局优化。
 // @author       Local userscript project
 // @license      MIT

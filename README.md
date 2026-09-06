@@ -126,6 +126,20 @@ npm test
 npm run build
 ```
 
+## 开发学习资料
+
+- [Markdown 主文档](docs/DEVELOPMENT_GUIDE.zh-CN.md)：适合在 GitHub 阅读、检索、审阅差异和持续维护。
+- [排版版 PDF](04_Deliverables/B站动态分组筛选-开发设计与演进指南.pdf)：适合连续阅读、打印和离线保存。
+
+PDF 由 Markdown 主文档生成。首次构建先安装独立的文档依赖，之后运行：
+
+```bash
+python -m pip install -r requirements-docs.txt
+npm run build:guide
+```
+
+生成器会优先使用 Windows 的微软雅黑；其他环境回退到 ReportLab 内置中文字体。正式发布前还会把 PDF 的每一页渲染为图片进行视觉检查，避免只验证“文件能打开”却遗漏表格截断、字体异常或孤立标题。
+
 ### 登录端到端测试限制
 
 自动化测试不包含 B 站账号凭据，也不应导入真实用户的 Cookie。因此，单元和 DOM 测试可覆盖筛选语义、数据清理、卡片提取与构建完整性，但无法持续保证真实登录态下的内部接口和实时 DOM。
