@@ -30,6 +30,8 @@
 
 脚本只在 `t.bilibili.com` 上被注入，并只在根路径的动态信息流启用界面和卡片处理。
 
+脚本元数据已配置 GitHub Raw `@updateURL` 和 `@downloadURL`。用户脚本管理器会依据 `@version` 检查更新；每个正式版本也会在 [GitHub Releases](https://github.com/Slowpulp/BILIBILI-Dynamic-Group-Filter/releases) 中附上当时构建的 `.user.js` 与 SHA-256 校验文件，便于下载旧版本或核对完整性。
+
 ## 分组操作语义
 
 使用关注分组前需要在 B 站登录。核心语义是“包含取并集、排除优先”。每个分组有三种状态：
@@ -88,7 +90,7 @@
 本项目的默认构建：
 
 - 没有遥测、埋点、广告或用户画像；
-- 没有站外请求，没有 `@require` 或远程第三方依赖；
+- 脚本运行时不发起站外请求，也没有 `@require` 或远程第三方运行时依赖；用户脚本管理器会按自身更新设置访问 GitHub Raw 检查并下载版本；
 - 仅使用当前 B 站登录会话对 `api.bilibili.com` 发起只读 `GET` 请求，用于检查登录状态、读取关注分组和分组成员；
 - 不会修改关注关系、分组成员或 B 站官方稍后看，也不会复制、导出或上传登录 Cookie；
 - 设置、分组缓存、隐藏记录和本地稍后看仅写入 `t.bilibili.com` 的 `localStorage`，其键名以 `__bilibili_timeline_focus_v1__:` 开头；

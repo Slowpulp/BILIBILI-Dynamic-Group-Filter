@@ -17,5 +17,7 @@
 - 版本号由改动影响按语义化版本决定：兼容性修复或小调整升级 `PATCH`；新增向后兼容功能升级 `MINOR`；不兼容的数据、配置或使用方式变更升级 `MAJOR`。
 - 发布前必须同步 `package.json`、`package-lock.json`、`src/userscript.meta.txt`、源码版本常量和 `CHANGELOG.md`，运行 `npm run verify`，并重新生成、纳入 `dist/BilibiliTimeline.user.js`。
 - 只有验证通过后才能创建发布提交和版本标签；标签统一使用 `v<major>.<minor>.<patch>`，并写明本次主要变化和验证结果。
+- 推送正式版本标签后，以该标签创建同名 GitHub Release，附上 `dist/BilibiliTimeline.user.js` 和包含其 SHA-256 的 `SHA256SUMS.txt`；Release 说明应概括本版变化与验证结果。
+- `src/userscript.meta.txt` 中的 `@updateURL` 与 `@downloadURL` 使用仓库 `main` 分支的 GitHub Raw 构建产物地址；变更仓库名、默认分支或产物路径时必须同步更新并验证。
 - 不把依赖目录、临时文件、账号数据、Cookie 或其他敏感内容加入版本库；提交前必须检查待提交清单。
 - 若工作区含有与当前需求无关的用户改动，应保留并排除在本次提交之外，不得擅自覆盖或一起提交。

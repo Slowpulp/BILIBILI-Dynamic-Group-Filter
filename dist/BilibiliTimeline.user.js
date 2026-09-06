@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         B站动态净览 - 分组筛选与阅读助手
 // @namespace    bilibili-timeline-focus.local
-// @version      3.0.0
+// @version      3.0.1
 // @description  按关注分组筛选B站动态，并提供推广抽奖识别、类型过滤、隐藏内容查看、本地稍后看与布局优化。
 // @author       Local userscript project
 // @license      MIT
+// @updateURL    https://raw.githubusercontent.com/Slowpulp/BILIBILI-Dynamic-Group-Filter/main/dist/BilibiliTimeline.user.js
+// @downloadURL  https://raw.githubusercontent.com/Slowpulp/BILIBILI-Dynamic-Group-Filter/main/dist/BilibiliTimeline.user.js
 // @match        https://t.bilibili.com/*
 // @run-at       document-idle
 // @noframes
@@ -1836,7 +1838,7 @@
 `;
 
   // src/main.js
-  var VERSION = "3.0.0";
+  var VERSION = "3.0.1";
   var STORAGE_PREFIX = "__bilibili_timeline_focus_v1__";
   var ROOT_ID = "btf-root";
   var GLOBAL_STYLE_ID = "btf-global-style";

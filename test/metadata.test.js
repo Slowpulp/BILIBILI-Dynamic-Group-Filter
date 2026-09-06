@@ -7,6 +7,10 @@ test("userscript metadata is installable, minimal, and version-aligned", async (
   const metadata = await readFile(new URL("src/userscript.meta.txt", projectUrl), "utf8");
   const packageJson = JSON.parse(await readFile(new URL("package.json", projectUrl), "utf8"));
   const lines = metadata.trim().split(/\r?\n/);
+  const distributionUrl = "https://raw.githubusercontent.com/Slowpulp/BILIBILI-Dynamic-Group-Filter/main/dist/BilibiliTimeline.user.js";
+  const metadataValue = (name) => lines
+    .find((line) => line.startsWith(`// ${name}`))
+    ?.replace(new RegExp(`^// ${name}\\s+`), "");
 
   assert.equal(lines[0], "// ==UserScript==");
   assert.equal(lines.at(-1), "// ==/UserScript==");
@@ -14,6 +18,12 @@ test("userscript metadata is installable, minimal, and version-aligned", async (
   assert.match(metadata, /^\/\/ @grant\s+none$/m);
   assert.match(metadata, /^\/\/ @inject-into\s+page$/m);
   assert.match(metadata, /^\/\/ @sandbox\s+raw$/m);
+  assert.equal(metadataValue("@updateURL"), distributionUrl);
+  assert.equal(metadataValue("@downloadURL"), distributionUrl);
+  for (const name of ["@updateURL", "@downloadURL"]) {
+    assert.equal(lines.filter((line) => line.startsWith(`// ${name}`)).length, 1);
+  }
+  assert.equal(new URL(distributionUrl).protocol, "https:");
   assert.match(metadata, new RegExp(`^// @version\\s+${packageJson.version.replaceAll(".", "\\.")}$`, "m"));
   assert.doesNotMatch(metadata, /^\/\/ @require\b/m);
   assert.doesNotMatch(metadata, /^\/\/ @connect\b/m);

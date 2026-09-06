@@ -23,7 +23,7 @@ import {
 } from "./layout.js";
 import { GLOBAL_STYLE, PANEL_STYLE } from "./style.js";
 
-const VERSION = "3.0.0";
+const VERSION = "3.0.1";
 const STORAGE_PREFIX = "__bilibili_timeline_focus_v1__";
 const ROOT_ID = "btf-root";
 const GLOBAL_STYLE_ID = "btf-global-style";
