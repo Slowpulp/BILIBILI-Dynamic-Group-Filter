@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   analyzeContentSignals,
   createContentSignals,
 } from "../src/content-filter.js";
+const FLASH_SALE_PROMOTION_EXAMPLES = JSON.parse(readFileSync(
+  new URL("./fixtures/promotion-examples.json", import.meta.url), "utf8",
+));
 
 test("an explicit product component is a high-confidence promotion", () => {
   const result = analyzeContentSignals(createContentSignals({
@@ -48,6 +52,77 @@ test("obfuscated Taobao spelling and Copy-message codes are recognized only as a
   assert.equal(result.confidence, "high");
   assert.ok(result.matches.promotion.reasonCodes.includes("commerce-platform"));
   assert.ok(result.matches.promotion.reasonCodes.includes("promotion-code"));
+});
+
+test("both reported flash-sale posts are high-confidence promotions using only visible text", () => {
+  for (const { name, text } of FLASH_SALE_PROMOTION_EXAMPLES) {
+    const result = analyzeContentSignals({ text });
+    assert.equal(result.matches.promotion.confidence, "high", name);
+    assert.equal(result.matches.promotion.suggestedAction, "hide", name);
+    for (const code of ["commerce-platform", "app-search", "promotion-code", "coupon-or-discount"]) {
+      assert.ok(result.matches.promotion.reasonCodes.includes(code), `${name}: ${code}`);
+    }
+    assert.equal(result.signals.structured.productComponent, false, name);
+  }
+});
+
+test("platform search codes support flash-sale/home channels, homophones and full-width text", () => {
+  const examples = [
+    "美团APP闪购嗖：445566，直接领29-20神券。",
+    "淘宝 App 首页 搜索：765432，25-25的券。",
+    "快去美团嗖：889977，25-25的券。",
+    "美团客户端外卖查找：556677，20元优惠券。",
+    "美团ＡＰＰ闪购嗖：１２３４５６，２５－２５的券。",
+    "淘宝app闪购栏目搜：987654，领取神券。",
+  ];
+  for (const text of examples) {
+    const result = analyzeContentSignals({ text });
+    assert.equal(result.matches.promotion.confidence, "high", text);
+    assert.equal(result.signals.promotion.appSearch, true, text);
+    assert.equal(result.signals.promotion.promotionCode, true, text);
+    assert.equal(result.signals.promotion.couponOrDiscount, true, text);
+  }
+});
+
+test("a contextual numeric search code still needs offer support for automatic hiding", () => {
+  const result = analyzeContentSignals({ text: "美团APP闪购嗖：556677" });
+  assert.equal(result.matches.promotion.confidence, "medium");
+  assert.equal(result.matches.promotion.suggestedAction, "collapse");
+});
+
+test("ordinary flash-sale posts and unrelated numbers do not manufacture search-code evidence", () => {
+  const examples = [
+    "美团闪购今天送得嗖嗖快，订单号233233，优惠券省5元。",
+    "闪购嗖：233233，25-25的券。",
+    "嗖：233233，领25元优惠券。",
+    "美团APP闪购嗖！233233，25-25的券。",
+    "美团APP闪购嗖：1234，25-25的券。",
+    "美团APP闪购嗖：1234567890123，25-25的券。",
+    "美团APP闪购嗖：233233ABC，25-25的券。",
+    "美团APP闪购嗖：123456.78，25-25的券。",
+    "233233，美团闪购，25-25的券。",
+    "神券",
+  ];
+  for (const text of examples) {
+    const result = analyzeContentSignals({ text });
+    assert.equal(result.signals.promotion.appSearch, false, text);
+    assert.equal(result.signals.promotion.promotionCode, false, text);
+    assert.equal(result.matches.promotion.suggestedAction, "show", text);
+  }
+});
+
+test("flash-sale homophones retain safety, review and explanatory-example protections", () => {
+  const examples = [
+    "反诈提醒：美团APP闪购嗖：233233，29-20神券，请勿参与。",
+    "警惕这类动态：美团嗖：445566，25-25的券。",
+    "美团闪购搜索功能测评：美团APP闪购嗖：233233，29-20神券展示体验。",
+    "教程：如何设计闪购页面？美团APP闪购嗖：233233，29-20神券只是测试用例。",
+  ];
+  for (const text of examples) {
+    const result = analyzeContentSignals({ text });
+    assert.equal(result.matches.promotion.confidence, "none", text);
+    assert.equal(result.matches.promotion.suggestedAction, "show", text);
+  }
 });
 
 test("a suspicious commercial combination is collapsible rather than auto-hidden", () => {

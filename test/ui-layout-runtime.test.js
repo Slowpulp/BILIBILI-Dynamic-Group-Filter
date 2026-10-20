@@ -1,8 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { JSDOM, VirtualConsole } from "jsdom";
+const FLASH_SALE_PROMOTION_EXAMPLES = JSON.parse(readFileSync(
+  new URL("./fixtures/promotion-examples.json", import.meta.url), "utf8",
+));
 
 const SETTINGS_KEY = "__bilibili_timeline_focus_v1__:settings";
 const bundlePromise = build({
@@ -384,6 +388,45 @@ test("promotion controls hide high-confidence content and keep suspicious cards 
     assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "0");
   });
   destroyRuntime(runtime);
+});
+
+test("reported flash-sale promotions hide in the runtime and restore with the promotion switch", async () => {
+  const runtime = await createRuntime({
+    cards: [
+      ...FLASH_SALE_PROMOTION_EXAMPLES.map(({ text }, index) => card({
+        did: String(904000001 + index), kind: "image", title: text,
+      })),
+      card({ did: "904000003", kind: "image", title: "美团闪购今天送得嗖嗖快，订单号233233，优惠券省5元。" }),
+    ].join(""),
+  });
+  const { window, shadow } = runtime;
+  const ads = ["904000001", "904000002"].map((id) => window.document.querySelector(`[data-did="${id}"]`));
+  const ordinary = window.document.querySelector('[data-did="904000003"]');
+  try {
+    await waitFor(() => {
+      for (const ad of ads) {
+        assert.equal(ad.dataset.btfHiddenReason, "promotion");
+        assert.match(ad.dataset.btfHiddenDetail, /App 搜索引导/);
+        assert.equal(ad.hasAttribute("data-btf-collapsed-reason"), false);
+      }
+      assert.equal(ordinary.hasAttribute("data-btf-hidden-reason"), false);
+      assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "2");
+      assert.equal(shadow.querySelector('[data-stat="visible"]').textContent, "1");
+    });
+    shadow.querySelector(".promotion-switch").click();
+    await waitFor(() => {
+      for (const ad of ads) assert.equal(ad.hasAttribute("data-btf-hidden-reason"), false);
+      assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "0");
+      assert.equal(shadow.querySelector('[data-stat="visible"]').textContent, "3");
+    });
+    shadow.querySelector(".promotion-switch").click();
+    await waitFor(() => {
+      for (const ad of ads) assert.equal(ad.dataset.btfHiddenReason, "promotion");
+      assert.equal(shadow.querySelector('[data-stat="hidden"]').textContent, "2");
+    });
+  } finally {
+    destroyRuntime(runtime);
+  }
 });
 
 test("collapsed controls recover from DOM replacement and expanded state follows the card identity", async () => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站动态净览 - 分组筛选与阅读助手
 // @namespace    bilibili-timeline-focus.local
-// @version      3.0.2
+// @version      3.0.3
 // @description  按关注分组筛选B站动态，并提供推广抽奖识别、类型过滤、隐藏内容查看、本地稍后看与布局优化。
 // @author       Local userscript project
 // @license      MIT
@@ -35,8 +35,9 @@
     ["得物", /得物(?:app)?/iu]
   ]);
   var APP_SEARCH_PATTERN = /(?:(?:app|客户端|平台)\s*(?:内|里)?\s*(?:搜|搜索|查找)|(?:快去|打开|上)\s*(?:美团|淘宝|桃宝|某宝|天猫|京东|拼多多|抖音|快手|饿了么|唯品会|苏宁|得物)\s*(?:app|客户端)?\s*(?:搜|搜索|查找)|(?:美团|淘宝|桃宝|某宝|天猫|京东|拼多多|抖音|快手|饿了么|唯品会|苏宁|得物)\s*(?:app|客户端)?\s*(?:搜|搜索|查找))/iu;
+  var PLATFORM_SEARCH_CODE_PATTERN = /(?:美团|淘宝|桃宝|某宝|天猫|京东|拼多多|抖音|快手|饿了么|唯品会|苏宁|得物)\s*(?:app|客户端)?\s*(?:(?:首页|闪购|外卖|栏目)\s*){0,2}(?:搜(?:索)?|查找|嗖)\s*[:：]?\s*(?:(?:口令|暗号|密令|券码)\s*[:：]?\s*)?\d{5,12}(?![a-z\d]|\.\d)/iu;
   var PROMOTION_CODE_PATTERN = /(?:口令|暗号|密令|券码|助力码|邀请码|复制|(?:搜|搜索|查找)(?:索)?)[^,，。!！?？;；\n]{0,12}(?:[a-z\d]{5,24}|￥[^￥\s]{3,30}￥)|(?:\d{0,2}\s*)?copy\s*这条(?:信息|消息)[^,，。!！?？;；\n]{0,24}[a-z\d]{7,30}/iu;
-  var COUPON_PATTERN = /优惠券|代金券|满减|折扣券|补贴|无门槛|红包|返现|立减|券后|领券|\d+(?:\.\d+)?\s*元?券/iu;
+  var COUPON_PATTERN = /优惠券|代金券|满减|折扣券|神券|补贴|无门槛|红包|返现|立减|券后|领券|\d+(?:\.\d+)?\s*元?\s*(?:的\s*)?券/iu;
   var PRICE_PATTERN = /(?:￥|¥)\s*\d+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?\s*(?:元|块)(?:\s*(?:起|到手))?|(?:到手|仅需|低至|秒杀价|活动价|券后价)[^,，。!！?？;；\n]{0,10}\d+(?:\.\d{1,2})?/iu;
   var URGENCY_PATTERN = /大漏|薅羊毛|秒杀|快冲|手慢无|限时|疯抢|抢到就是赚|赶紧冲|疯狂放水|神价|白菜价/iu;
   var COMMERCIAL_CTA_PATTERN = /立即购买|去看看|去购买|去抢购|立即抢购|下单|包邮|同款|购买链接|商品链接|快去[^,，。!！?？;；\n]{0,12}(?:搜|买|领)/iu;
@@ -96,6 +97,7 @@
   function createContentSignals(input = {}) {
     const text = normalizeText(input.text);
     const platforms = detectedPlatforms(text);
+    const hasPlatformSearchCode = PLATFORM_SEARCH_CODE_PATTERN.test(text);
     const giveawayActions = detectedGiveawayActions(text);
     const hasGiveawayMention = GIVEAWAY_MENTION_PATTERN.test(text);
     const hasStrongGiveawayCall = STRONG_GIVEAWAY_PATTERN.test(text);
@@ -115,8 +117,8 @@
       },
       promotion: {
         platforms,
-        appSearch: APP_SEARCH_PATTERN.test(text),
-        promotionCode: PROMOTION_CODE_PATTERN.test(text),
+        appSearch: APP_SEARCH_PATTERN.test(text) || hasPlatformSearchCode,
+        promotionCode: PROMOTION_CODE_PATTERN.test(text) || hasPlatformSearchCode,
         couponOrDiscount: COUPON_PATTERN.test(text),
         price: PRICE_PATTERN.test(text),
         urgency: URGENCY_PATTERN.test(text),
@@ -1838,7 +1840,7 @@
 `;
 
   // src/main.js
-  var VERSION = "3.0.2";
+  var VERSION = "3.0.3";
   var STORAGE_PREFIX = "__bilibili_timeline_focus_v1__";
   var ROOT_ID = "btf-root";
   var GLOBAL_STYLE_ID = "btf-global-style";
